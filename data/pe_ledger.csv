@@ -1,0 +1,5 @@
+id,data,confronto,competicao,mercado,patamar,confianca,wilson_inferior,melhor_casa,odd_referencia,resultado,ocorreu,nota
+1,2026-07-25,Santos x Chapecoense,Brasileirao Serie A,Total de gols,Mais de 2.5,Alta,NA,nao encontrada,NA,2-2 (4 gols),sim,"Convergencia dos dois lados confirmada"
+2,2026-07-25,Vasco x Mirassol,Brasileirao Serie A,Escanteios,Menos de 10.5,Moderada,NA,nao encontrada,NA,1-1 (escanteios nao verificaveis),arquivado,"3 tentativas esgotadas - contagem exata de escanteios nunca encontrada"
+3,2026-07-26,Criciuma x Nautico,Brasileirao Serie B,Dupla chance,1X,Alta,NA,Betano 1.17,1.17,retirado,retirado,"Retestado com odds reais Betano no mesmo dia (9.1): sem edge - PE substituido pela conclusao testada. Nao conta p/ calibracao"
+4,2026-07-27,Atletico-GO x Operario-PR,Brasileirao Serie B,Ambas marcam,Nao,Moderada,0.44,nao encontrada,NA,pendente,pendente,"Dado contra narrativa de tipster (que dizia BTTS Sim); H2H 3/3 Operario sem sofrer + 0.2 GC/jogo recente"

@@ -1,0 +1,8 @@
+id,data,confronto,competicao,mercado,selecao,odd_entrada,casa,prob_estimada,prob_justa_novig,edge_declarado,odd_fechamento,clv,stake_unidades,resultado,acerto_erro,nota_processo
+1,2026-07-07/12,DADOS_AGREGADOS_SEMANA1,varias,varios,varios,NA,NA,NA,NA,NA,NA,NA,NA,3A/3E/1NV,agregado,"PERDA DE DADOS: detalhe por aposta das semanas 07-12/07 nao sobreviveu a compressao do historico em texto - so agregado. Motivacao direta da criacao deste ledger (v12)"
+2,2026-07-13/19,DADOS_AGREGADOS_SEMANA2,varias,varios,varios,NA,NA,NA,NA,NA,NA,NA,NA,2A/3E,agregado,"PERDA DE DADOS: idem semana 1"
+3,2026-07-21,Atletico-MG x Bahia,Brasileirao Serie A,Total de gols,Mais de 2.5,1.90,nao registrada,0.565,NA,0.039,NA,NA,1,1-1,erro,"Variancia desfavoravel; prob justa no-vig nao calculada na epoca (pre-v4 completo)"
+4,2026-07-21,Atletico-MG x Bahia,Brasileirao Serie A,Escanteios,Mais de 9.5,1.80,nao registrada,0.625,NA,0.069,NA,NA,1,7 escanteios,erro,"Variancia; dado conflitante declarado"
+5,2026-07-22,Independiente Medellin x Vasco,Copa Sul-Americana,1X2,Vitoria Medellin,2.45,nao registrada,0.475,NA,0.067,NA,NA,1,2-2,erro,"Contrafactual (v11): over 2.5 (4 gols) teria sido acerto; DNB teria sido push. Erro de EXPRESSAO, nao de leitura de forca"
+6,2026-07-22,Sporting Cristal x Bragantino,Copa Sul-Americana,1X2,Vitoria Bragantino,2.25,nao registrada,0.50,NA,0.056,NA,NA,1,0-0,erro,"Contrafactual (v11): under 2.5 teria sido acerto; DNB teria sido push. Mesmo padrao de expressao"
+7,2026-07-23,Bolivar x Gremio,Copa Sul-Americana,1X2,Vitoria Bolivar,1.67,nao registrada,0.65,NA,0.051,NA,NA,1,3-2,acerto,"Processo correto; tese altitude+desfalques confirmada"
