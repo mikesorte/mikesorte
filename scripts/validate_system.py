@@ -89,6 +89,29 @@ def main():
     except Exception as e:
         err(f"motor: falha ao carregar/testar - {e}")
 
+    # 3b) regressao no parser de varredura ampla (v15) - schema sintetico da casa
+    try:
+        from scan_odds import parse_mres_blocks, is_liga_menor, LIGA_MENOR_DEFAULT
+        synthetic = (
+            '{"data":{"event":{"leagueName":"Liga Teste - Qualif.","name":"Time A - Time B","startTime":1785364200000,'
+            '"markets":[{"id":"1","name":"Resultado Final","type":"MRES","selections":['
+            '{"id":"1","name":"1","fullName":"Time A","price":2.0},'
+            '{"id":"2","name":"X","fullName":"Empate","price":3.4},'
+            '{"id":"3","name":"2","fullName":"Time B","price":4.0}]}]}}}'
+        )
+        evs = parse_mres_blocks(synthetic)
+        assert len(evs) == 1, f"parser deveria achar 1 evento, achou {len(evs)}"
+        e = evs[0]
+        assert e["odds"] == [2.0, 3.4, 4.0], f"odds extraidas erradas: {e['odds']}"
+        assert e["competition"] == "Liga Teste - Qualif.", f"competition errada: {e['competition']}"
+        assert e["participants"] == "Time A - Time B", f"participants errado: {e['participants']}"
+        assert is_liga_menor("Champions League - Qualificação", LIGA_MENOR_DEFAULT), "liga menor nao detectada (qualif)"
+        assert not is_liga_menor("Brasileirao Serie A", LIGA_MENOR_DEFAULT), "falso positivo de liga menor"
+    except AssertionError as e:
+        err(f"scan_odds: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"scan_odds: falha ao carregar/testar - {e}")
+
     # relatorio
     print("=== AUTO-DIAGNOSTICO DO SISTEMA ===")
     print(f"apostas_ledger: {len(apostas)} linhas | pe_ledger: {len(pes)} linhas")
