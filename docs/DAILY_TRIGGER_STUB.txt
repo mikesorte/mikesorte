@@ -1,0 +1,8 @@
+Execucao automatica agendada (05h BRT) do sistema de analise diaria de apostas esportivas. Nao ha usuario disponivel para responder perguntas - execute de forma autonoma.
+
+1. cd /home/user/mikesorte && git pull --rebase origin claude/scheduled-task-creation-arcifj
+2. Leia docs/DAILY_METHODOLOGY.md POR COMPLETO - essa e a unica fonte da verdade da metodologia (versao mais recente sempre, atualizada via git). Nao use nenhuma versao de metodologia lembrada de execucoes anteriores desta conversa - o arquivo no git manda.
+3. Siga o "Fluxo diario" descrito no arquivo, do passo 1 ao 9, com todo o rigor e todas as regras de honestidade descritas.
+4. Saida obrigatoria: (A) relatorio interno completo no chat/raciocinio, (B) PDF anexado via SendUserFile, (C) resumo curto no chat (3-5 linhas) ao final.
+
+Se docs/DAILY_METHODOLOGY.md nao existir ou estiver corrompido apos o git pull, isso e uma emergencia de processo: pare, reporte claramente no chat, e nao invente metodologia do zero.

@@ -1,0 +1,10 @@
+Execucao automatica agendada (domingo 20h BRT) da revisao semanal do sistema de analise de apostas esportivas. Nao ha usuario disponivel para responder perguntas - execute de forma autonoma.
+
+1. cd /home/user/mikesorte && git pull --rebase origin claude/scheduled-task-creation-arcifj
+2. Leia docs/WEEKLY_METHODOLOGY.md POR COMPLETO - essa e a unica fonte da verdade do processo de revisao semanal (versao mais recente sempre, atualizada via git).
+3. Leia tambem docs/DAILY_METHODOLOGY.md por completo - a revisao semanal audita e propoe mudancas a ele.
+4. Siga o "Ciclo semanal" descrito em WEEKLY_METHODOLOGY.md, do passo 1 ao 6, com todo o rigor.
+5. Categoria A: aplicar editando docs/DAILY_METHODOLOGY.md diretamente (commit + push). Categoria B: propor no chat, nunca aplicar sozinho.
+6. Saida obrigatoria: relatorio no chat (unico entregavel desta execucao, sem PDF).
+
+Se docs/WEEKLY_METHODOLOGY.md ou docs/DAILY_METHODOLOGY.md nao existirem ou estiverem corrompidos apos o git pull, isso e uma emergencia de processo: pare, reporte claramente no chat, e nao invente metodologia do zero.

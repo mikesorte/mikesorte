@@ -42,7 +42,21 @@ def check_csv(path, required_cols, id_col="id"):
     return rows
 
 
+def check_doc(path, min_bytes=500):
+    full = os.path.join(ROOT, path)
+    if not os.path.exists(full):
+        err(f"{path}: ARQUIVO AUSENTE - metodologia inacessivel (v16, ponto critico)")
+        return
+    size = os.path.getsize(full)
+    if size < min_bytes:
+        err(f"{path}: suspeito de truncamento/corrupcao ({size} bytes, esperado >={min_bytes})")
+
+
 def main():
+    # 0) metodologia versionada em git (v16) - fonte da verdade da trigger
+    check_doc("docs/DAILY_METHODOLOGY.md")
+    check_doc("docs/WEEKLY_METHODOLOGY.md")
+
     # 1) ledgers integros
     apostas = check_csv("data/apostas_ledger.csv",
                         ["id", "data", "confronto", "mercado", "odd_entrada",
@@ -69,12 +83,16 @@ def main():
     # 3) regressao no motor de calculo
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     try:
-        from betting_model import devig_power, poisson_dixon_coles, wilson_ci, ev_unitario, clv
+        from betting_model import devig_power, poisson_dixon_coles, wilson_ci, ev_unitario, clv, win_by_margin
         f = devig_power([1.50, 4.20, 7.10])
         assert abs(sum(f) - 1) < 1e-6, "devig nao soma 1"
         assert 0.60 < f[0] < 0.70, f"devig favorito fora da faixa esperada: {f[0]}"
         m = poisson_dixon_coles(1.9, 0.8)
         assert abs(m["p_home"] + m["p_draw"] + m["p_away"] - 1) < 1e-9, "DC nao soma 1"
+        assert abs(sum(m["margins"].values()) - 1) < 1e-6, "margins nao soma 1"
+        assert abs(win_by_margin(m, 1) - m["p_home"]) < 1e-9, "win_by_margin(margem>=1) deveria bater com p_home (qualquer vitoria)"
+        assert abs(win_by_margin(m, 0) - (m["p_home"] + m["p_draw"])) < 1e-9, "win_by_margin(margem>=0) deveria incluir empates"
+        assert win_by_margin(m, 99) == 0, "win_by_margin com margem impossivel deveria ser 0"
         p, lo, hi = wilson_ci(6, 16)
         assert lo < p < hi and 0 <= lo and hi <= 1, "wilson invalido"
         assert abs(ev_unitario(0.5, 2.0)) < 1e-9, "EV(0.5,2.0) deveria ser 0"
