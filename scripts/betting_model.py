@@ -54,6 +54,7 @@ def poisson_dixon_coles(lambda_home, lambda_away, rho=-0.11, max_goals=10):
 
     out = {"p_home": 0.0, "p_draw": 0.0, "p_away": 0.0, "btts": 0.0}
     overs = {1.5: 0.0, 2.5: 0.0, 3.5: 0.0}
+    margins = {}  # margem de gols (h - a) -> probabilidade, uso em mata-mata (agregado)
     for (h, a), p in grid.items():
         if h > a:
             out["p_home"] += p
@@ -66,10 +67,20 @@ def poisson_dixon_coles(lambda_home, lambda_away, rho=-0.11, max_goals=10):
         for line in overs:
             if h + a > line:
                 overs[line] += p
+        margins[h - a] = margins.get(h - a, 0.0) + p
     for line, p in overs.items():
         out[f"over_{line}"] = p
         out[f"under_{line}"] = 1 - p
+    out["margins"] = margins
     return out
+
+
+def win_by_margin(model_out, min_margin):
+    """P(mandante vence por >= min_margin gols de diferenca), a partir do
+    dict retornado por poisson_dixon_coles(). Uso tipico: mata-mata em que
+    o mandante precisa reverter o placar agregado por N gols (ex.: Grêmio
+    precisando vencer por 2+ apos derrota de 3-2 na ida)."""
+    return sum(p for m, p in model_out["margins"].items() if m >= min_margin)
 
 
 # ------------------------------------------------------------------- de-vig
