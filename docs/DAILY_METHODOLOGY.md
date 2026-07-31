@@ -337,6 +337,52 @@ manchete só mostrara 2), 2 da Irlanda Premier, 3 da Finlândia, Estônia,
 Dinamarca e Escócia. Este passa a ser o método padrão de varredura ampla
 quando o Nimble não entrega o catálogo da casa.
 
+(34) v21 (31/07): **automação real — resiliência a oscilação + múltiplas
+casas.** O usuário deixou claro que exportar PDF manualmente todo dia não é
+automação, é transferir trabalho para ele. Correto. Duas fragilidades reais
+foram medidas hoje e atacadas:
+
+**(a) Os conectores OSCILAM.** Medição de 31/07: Nimble/Tavily/Exa estavam
+**fora às 05h** (hora da execução diária), **voltaram às 09h40** (Tavily leu
+worldfootball com 188 jogos), e **caíram de novo às 10h**. A execução checava
+conectores UMA vez, no passo 2, e desistia. Perdia-se o dia inteiro por azar
+de timing, com os conectores disponíveis horas depois.
+
+**Protocolo de resiliência (obrigatório):**
+- A checagem de conectores deixa de ser um portão único. Se estiverem fora no
+  início, **seguir a execução** (git, ledger, filas, varredura de fixtures via
+  WebSearch) e **re-checar pelo menos 3 vezes** ao longo do trabalho, usando
+  `Bash(sleep N, run_in_background=true)` entre as tentativas para não
+  bloquear.
+- Só declarar "sem odds hoje" depois de no mínimo **3 checagens espaçadas**
+  falharem — nunca depois de uma.
+- Disparar `nimble_extract_async` **cedo**, seguir trabalhando e recolher
+  depois; nunca esperar parado.
+
+**(b) Fonte única.** O sistema só tentava a Betano — um SPA pesado e
+geo-protegido onde TUDO falhou hoje (sync timeout, async pendente >5min, Exa
+casca, Tavily bloqueio). Mas são **nove** casas licenciadas, e Superbet,
+Betfair, KTO, Novibet, EstrelaBet, Bet Nacional e Sportingbet **nunca foram
+testadas**. Algumas podem ser server-rendered — e o Tavily já provou que lê
+página server-rendered sem dificuldade.
+
+**`scripts/odds_sources.py`** (v21) resolve isso sem eu chutar: registra cada
+tentativa (casa × ferramenta × resultado) em `data/extraction_log.csv` e
+`--plano` devolve a ordem de tentativa do dia, com a prioridade
+**sucesso comprovado > nunca testado > já falhou**. O sistema descobre
+sozinho qual casa é extraível, por dado. Toda execução diária DEVE registrar
+suas tentativas — é assim que o ranking ganha valor.
+
+**Estado inicial já registrado (medido, não suposto):** Betano falhou em
+`nimble_extract`, `nimble_extract_async`, `exa_web_fetch` e `tavily_extract`;
+só `pdf_export` deu OK. Por isso o plano de hoje sobe Superbet e Betfair ao
+topo — são as próximas a testar quando os conectores voltarem.
+
+**Honestidade:** isto aumenta muito a chance de conseguir odds
+automaticamente, mas não garante. Se todas as casas resistirem à extração, o
+sistema opera em modo PE-first (v17-3) — que não depende de odds — e o PDF
+continua existindo como último recurso, não como rotina.
+
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17
 colunas — vírgula não escapada dentro do campo `casa` (ex.: `Superbet (odds
@@ -376,9 +422,12 @@ CONSOLIDADO; (B) PDF anexado; (C) resumo curto no chat (3-5 linhas).
    erros, anotar pendências).
 2. `ListConnectors` **E** `ToolSearch` para os três (Nimble, Exa, Tavily) —
    o flag `enabledInChat` diverge da disponibilidade real, então o que vale é
-   a ferramenta CARREGAR. Reportar o status dos três, não só do Nimble. Se
-   qualquer um carregar, usar a cascata de extração (v18) — nunca pular
-   direto para WebSearch só porque o Nimble falhou.
+   a ferramenta CARREGAR. Reportar o status dos três, não só do Nimble.
+   **NÃO é um portão (v21):** se estiverem fora, seguir a execução e
+   re-checar ao menos 3× ao longo do trabalho (eles oscilam — em 31/07
+   caíram, voltaram às 09h40 e caíram de novo). Rodar
+   `python3 scripts/odds_sources.py --plano` para saber qual casa × ferramenta
+   tentar primeiro, e **registrar cada tentativa** com `--registrar`.
 3. Resolver filas 14.4/14.5 + resultados de ontem + BUSCAR ODDS DE
    FECHAMENTO de ontem → preencher CLV no ledger (`clv()` do motor).
 4. **VARREDURA AMPLA — dois caminhos, nunca "dia fraco" sem ter feito os dois

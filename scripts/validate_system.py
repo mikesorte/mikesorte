@@ -241,6 +241,31 @@ def main():
     except Exception as e:
         err(f"parse_fixtures: falha ao carregar/testar - {e}")
 
+    # 3f) regressao no registro de fontes de odds (v21). O ranking decide a
+    # ordem de tentativa da execucao, entao a logica de prioridade precisa
+    # estar certa: sucesso comprovado > nunca testado > ja falhou. A primeira
+    # versao punha 0/1 ACIMA de nunca-testado, o que faria o sistema insistir
+    # eternamente no que nao funciona em vez de descobrir alternativa.
+    try:
+        from odds_sources import plano_de_tentativa, CASAS, RESULTADOS, OK
+        assert len(CASAS) == 9, f"deveriam ser as 9 casas licenciadas, ha {len(CASAS)}"
+        assert OK in RESULTADOS, "vocabulario de resultado quebrado"
+        plano = plano_de_tentativa()
+        assert plano, "plano de tentativa vazio"
+        rotulos = [p["historico"] for p in plano]
+        if "nunca testado" in rotulos:
+            i_novo = rotulos.index("nunca testado")
+            falhados = [i for i, r in enumerate(rotulos)
+                        if r.startswith("0/")]
+            if falhados:
+                assert i_novo < min(falhados), (
+                    "prioridade invertida: combinacao que ja FALHOU esta acima "
+                    "de uma nunca testada - o sistema pararia de descobrir")
+    except AssertionError as e:
+        err(f"odds_sources: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"odds_sources: falha ao carregar/testar - {e}")
+
     # 4) a metodologia precisa manter a cascata de extracao explicita (v18).
     # Bug de processo real: por semanas o doc definia "metodo v9 = Nimble" e
     # caia direto para WebSearch, sem nunca citar Exa/Tavily - que estavam
@@ -263,7 +288,7 @@ def main():
     # redirecionar a execucao para a metodologia real, versionada em git.
     print("=" * 68)
     print("ROTA OBRIGATORIA: a fonte da verdade da metodologia e")
-    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v20)")
+    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v21)")
     print("Se o prompt desta execucao veio embutido na trigger agendada, ele")
     print("esta DESATUALIZADO - leia o arquivo acima e siga o fluxo de la.")
     print("Diferencas que o texto embutido antigo NAO tem: varredura por")

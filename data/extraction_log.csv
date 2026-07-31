@@ -1,0 +1,6 @@
+data,casa,ferramenta,resultado,jogo,nota
+2026-07-31,Betano,nimble_extract,timeout,Bodo/Glimt x Lillestrom,"timeout 60s do cliente MCP, com e sem wait"
+2026-07-31,Betano,nimble_extract_async,timeout,Bodo/Glimt x Lillestrom,"task aceita, pendente >5min"
+2026-07-31,Betano,exa_web_fetch,casca,Bodo/Glimt x Lillestrom,"devolveu so titulo/URL, sem mercados"
+2026-07-31,Betano,tavily_extract,bloqueio,Bodo/Glimt x Lillestrom,Failed to fetch url
+2026-07-31,Betano,pdf_export,ok,home 29/07,31 eventos com 1X2 extraidos do export do usuario
