@@ -72,16 +72,30 @@ CASAS = [
     dict(nome="Bet365", dominio="bet365.bet.br", padrao_url=None,
          tipo="SPA pesado, anti-bot agressivo",
          evidencia="odds obtidas via pagina de NOTICIA (news.bet365.bet.br) em 30/07"),
-    dict(nome="KTO", dominio="kto.bet.br", padrao_url=None,
-         tipo="desconhecido", evidencia="nunca testada"),
-    dict(nome="Novibet", dominio="novibet.bet.br", padrao_url=None,
-         tipo="desconhecido", evidencia="nunca testada"),
-    dict(nome="EstrelaBet", dominio="estrelabet.bet.br", padrao_url=None,
-         tipo="desconhecido", evidencia="nunca testada"),
-    dict(nome="Bet Nacional", dominio="betnacional.bet.br", padrao_url=None,
-         tipo="desconhecido", evidencia="nunca testada"),
-    dict(nome="Sportingbet", dominio="sportingbet.bet.br", padrao_url=None,
-         tipo="desconhecido", evidencia="nunca testada"),
+    dict(nome="KTO", dominio="kto.bet.br",
+         padrao_url="https://www.kto.bet.br/palpites/",
+         tipo="desconhecido",
+         evidencia="pagina de palpites/odds vista em busca 31/07; extracao NAO testada"),
+    dict(nome="Novibet", dominio="novibet.bet.br",
+         padrao_url="https://www.novibet.bet.br/apostas-esportivas/futebol/4372606/{pais}/{liga}/{liga_id}",
+         tipo="desconhecido",
+         evidencia=("URL REAL de liga vista em busca 31/07 (Eliteserien: "
+                    ".../norway/eliteserien/4377419). Tem tambem "
+                    "/eventos-do-dia, candidato a CATALOGO do dia. NAO testada")),
+    dict(nome="EstrelaBet", dominio="estrelabet.bet.br",
+         padrao_url="https://www.estrelabet.bet.br/aposta-esportiva",
+         tipo="desconhecido",
+         evidencia="hub de apostas visto em busca 31/07; extracao NAO testada"),
+    dict(nome="Bet Nacional", dominio="betnacional.bet.br",
+         padrao_url="https://betnacional.bet.br/sport-event/{esporte_id}/{liga_id}",
+         tipo="desconhecido",
+         evidencia=("URLs REAIS de listagem vistas em busca 31/07 "
+                    "(/sport-event/1/2 e /sport-event/137/1). NAO testada")),
+    dict(nome="Sportingbet", dominio="sportingbet.bet.br",
+         padrao_url="https://www.sportingbet.bet.br/pt-br/sports/futebol-4/aposta/{pais}-{id}",
+         tipo="desconhecido",
+         evidencia=("URL REAL de pais vista em busca 31/07 "
+                    "(futebol-4/aposta/brasil-33). NAO testada")),
 ]
 
 # Ferramentas de extracao, com o que ja foi MEDIDO sobre cada uma (31/07).
