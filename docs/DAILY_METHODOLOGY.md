@@ -154,6 +154,51 @@ gerenciamento), não todas as falhas possíveis — nenhum sistema é
 falha evitáveis uma de cada vez, com evidência de causa raiz, como este
 próprio caso.
 
+(28) v17 (31/07): **duas falhas reais de cobertura, com evidência.** (a) A
+execução de 31/07 declarou "dia fraco, 1 jogo elegível" numa sexta-feira em
+que existiam dezenas de jogos (Eliteserien x2, Meistriliiga estoniana,
+Ykkösliiga finlandesa x2, Welsh Premier x4, Equador x2, El Salvador x2, MLS,
+Scottish Premiership, qualificatórias UEFA). **Causa raiz:** a descoberta era
+feita por WebSearch em português ("jogos de futebol hoje"), que retorna
+NOTÍCIA brasileira — e notícia brasileira só cobre Brasileirão/grandes ligas.
+As ligas que a própria regra 8 diz serem as mais promissoras (menos
+eficientes) são exatamente as que nunca aparecem em manchete: escandinavas,
+bálticas, irlandesa, islandesa — todas em **pico de temporada em julho**.
+(b) Nos dias 29, 30 e 31/07 foram emitidos **zero PEs**, sempre justificados
+com "sem odds confiáveis" — mas o PE (9.3) **não depende de odds**, só de
+dado e convergência. "Sem odds" foi tratado como "sem output", quando a
+metodologia tem um caminho explícito para esse caso.
+
+**Fixes obrigatórios:**
+
+1. `scripts/league_calendar.py` — base de conhecimento versionada de quais
+   ligas estão em temporada em cada mês, com classificação de eficiência de
+   mercado, qualidade de dado e cobertura pelas casas licenciadas BR. Roda
+   sem rede. `python3 scripts/league_calendar.py --prioridade` dá a ordem de
+   varredura do dia. Em julho retorna 29 ligas ativas, com Allsvenskan e
+   Eliteserien acima do Brasileirão A na prioridade (regra 8).
+2. **Descoberta por catálogo, nunca por manchete.** A varredura passa a usar
+   `WebSearch` com `allowed_domains` apontando para sites de FIXTURE
+   (`worldfootball.net`, `flashscore.com`, `soccerway.com`, `espn.com`,
+   `sofascore.com`), nunca portal de notícia. Padrão validado em 31/07:
+   `worldfootball.net/matches-today/dnYYYY-MM-DD/` retorna a lista global do
+   dia; busca por liga+data nos demais retorna a tabela real. Buscar em
+   INGLÊS e por NOME DE LIGA, não em português por "jogos de hoje".
+3. **PE-first quando não há odds.** Se os conectores estiverem fora e não
+   houver odds de dois lados da mesma casa, o output correto do dia é uma
+   varredura ampla + PEs onde o dado sustentar — NÃO silêncio. O orçamento da
+   execução deve ser realocado: menos tentativas de achar odds que não vão
+   aparecer, mais coleta de estatística dos dois lados para PE.
+4. **Limite honesto declarado (não contornável):** sem Nimble, o WebSearch
+   acha a URL da página de odds da casa (ex.: `betano.bet.br/odds/...`) mas
+   NÃO consegue ler o conteúdo dinâmico. Portanto **Apostas de Valor ficam
+   estruturalmente indisponíveis em dias sem conector** — apenas PEs são
+   possíveis. Isso deve ser dito no relatório, não disfarçado.
+5. Isto NÃO afrouxa 9.3: PE continua exigindo convergência dos DOIS lados +
+   Wilson + N≥5/lado. Em 31/07 os dados vieram fragmentados e **nenhum PE foi
+   emitido** mesmo com o novo processo — o correto. "Mais PEs" é resultado de
+   coletar mais dado, nunca de baixar o critério.
+
 ## Casas licenciadas (SPA/MF)
 
 Betano, Bet Nacional, Superbet, Bet365, Sportingbet, KTO, Novibet,
@@ -182,15 +227,36 @@ CONSOLIDADO; (B) PDF anexado; (C) resumo curto no chat (3-5 linhas).
    habilitados, método v9 é o padrão).
 3. Resolver filas 14.4/14.5 + resultados de ontem + BUSCAR ODDS DE
    FECHAMENTO de ontem → preencher CLV no ledger (`clv()` do motor).
-4. **VARREDURA AMPLA (v15):** `nimble_extract` na home ou hub de futebol
-   da casa (ex.: `betano.bet.br/sport/futebol/`) + `python3
-   scripts/scan_odds.py <dump>` → tabela de TODOS os eventos com 1X2
-   achados (não só manchete de notícia). Reportar essa tabela inteira no
-   relatório (cobertura real). Escolher 2-4 jogos para pesquisa profunda a
-   partir dela, priorizando flag LIGA MENOR (regra 8) e diversidade de
-   região/competição — não só Brasileirão. Se Nimble estiver indisponível,
-   cair para WebSearch triangulado e declarar a limitação (v15-b).
+4. **VARREDURA AMPLA — dois caminhos, nunca "dia fraco" sem ter feito os dois
+   (v15 + v17):**
+
+   4a. `python3 scripts/league_calendar.py --prioridade` — lista as ligas em
+   temporada HOJE, ordenadas por prioridade (menos eficiente + precificada +
+   com dado). Isto define O QUE procurar e roda sem rede. Nunca pular.
+
+   4b. **Com Nimble:** `nimble_extract` na home/hub de futebol da casa
+   (`betano.bet.br/sport/futebol/`) + `python3 scripts/scan_odds.py <dump>`
+   → catálogo real com odds.
+
+   4c. **Sem Nimble (caminho v17, obrigatório):** `WebSearch` com
+   `allowed_domains=["worldfootball.net","flashscore.com","soccerway.com",
+   "espn.com","sofascore.com"]`, em INGLÊS e por NOME DE LIGA da lista 4a.
+   O padrão `worldfootball.net/matches-today/dnYYYY-MM-DD/` dá a lista global
+   do dia. **Proibido** usar busca em português tipo "jogos de futebol hoje"
+   como fonte de descoberta — retorna notícia, e notícia só cobre
+   Brasileirão/grandes ligas (falha documentada de 31/07).
+
+   Reportar a tabela de varredura inteira no relatório (cobertura real).
+   Escolher 2-4 jogos para pesquisa profunda a partir dela, priorizando ligas
+   de eficiência BAIXA precificadas pelas casas BR (regra 8) e diversidade de
+   região — não só Brasileirão. Declarar "dia fraco" só é aceitável depois de
+   4a + 4c terem sido executados e reportados.
 5. Odds reais (método v9 quando disponível; senão WebSearch triangulado).
+5.1. **Se os conectores estiverem fora (v17):** não gastar o orçamento
+   inteiro tentando achar odds de dois lados que não vão aparecer. Após 2
+   tentativas frustradas, realocar o esforço para coleta de estatística dos
+   DOIS lados dos jogos melhor ranqueados, visando PE (9.3). Apostas de Valor
+   ficam estruturalmente indisponíveis nesses dias — declarar isso.
 6. Cálculo NUMÉRICO: lambdas → `poisson_dixon_coles()`; odds →
    `devig_power()`; edge = prob própria - prob justa; `ev_unitario()`; só
    recomendar com folga clara. Sem odd confiável → PE (9.3) com

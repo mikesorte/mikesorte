@@ -130,6 +130,40 @@ def main():
     except Exception as e:
         err(f"scan_odds: falha ao carregar/testar - {e}")
 
+    # 3c) regressao no calendario de ligas (v17) - conhecimento de temporada
+    try:
+        from league_calendar import (ligas_ativas, ligas_por_prioridade,
+                                     prioridade_busca, LIGAS)
+        nomes = [lg["nome"] for lg in LIGAS]
+        assert len(nomes) == len(set(nomes)), "league_calendar: liga duplicada"
+        for lg in LIGAS:
+            assert lg["meses"], f"league_calendar: {lg['nome']} sem meses"
+            assert all(1 <= m <= 12 for m in lg["meses"]), f"league_calendar: mes invalido em {lg['nome']}"
+
+        # A falha real de 31/07: nordicas em temporada em julho nao foram vistas.
+        jul = {lg["nome"] for lg in ligas_ativas(7)}
+        for obrigatoria in ("Allsvenskan (Suecia)", "Eliteserien (Noruega)",
+                            "Veikkausliiga (Finlandia)", "Meistriliiga (Estonia)"):
+            assert obrigatoria in jul, f"league_calendar: {obrigatoria} deveria estar ativa em julho"
+
+        # Top-5 europeu esta em PRE-TEMPORADA em julho - nao deve aparecer como ativa
+        for fora in ("Premier League", "LaLiga", "Bundesliga"):
+            assert fora not in jul, f"league_calendar: {fora} nao deveria estar ativa em julho (pre-temporada)"
+
+        # regra 8: liga menos eficiente e precificada deve ter prioridade MAIOR
+        # que liga muito eficiente - senao a varredura volta a priorizar manchete
+        elite = next(lg for lg in LIGAS if lg["nome"] == "Eliteserien (Noruega)")
+        bra_a = next(lg for lg in LIGAS if lg["nome"] == "Brasileirao Serie A")
+        assert prioridade_busca(elite) > prioridade_busca(bra_a), \
+            "league_calendar: liga ineficiente precificada deveria ter prioridade > Brasileirao A (regra 8)"
+
+        ordenadas = ligas_por_prioridade(7)
+        assert len(ordenadas) == len(ligas_ativas(7)), "league_calendar: ordenacao perdeu ligas"
+    except AssertionError as e:
+        err(f"league_calendar: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"league_calendar: falha ao carregar/testar - {e}")
+
     # relatorio
     print("=== AUTO-DIAGNOSTICO DO SISTEMA ===")
     print(f"apostas_ledger: {len(apostas)} linhas | pe_ledger: {len(pes)} linhas")
