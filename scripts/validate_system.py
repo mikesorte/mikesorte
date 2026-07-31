@@ -282,6 +282,29 @@ def main():
     except Exception as e:
         err(f"odds_sources: falha ao carregar/testar - {e}")
 
+    # 3g) regressao no log de conectores (v22). Bug real: registrar varias
+    # observacoes do dia de uma vez carimbava todas com a hora ATUAL, fazendo
+    # o log dizer que 21h tinha disponibilidade quando a unica janela foi
+    # ~09h40. Log com hora errada e pior que log nenhum - orientaria a trigger
+    # para o horario errado.
+    try:
+        import importlib
+        cl = importlib.import_module("connector_log")
+        assert hasattr(cl, "registrar"), "connector_log sem registrar()"
+        import inspect
+        params = inspect.signature(cl.registrar).parameters
+        assert "quando" in params, (
+            "registrar() perdeu o parametro 'quando' - observacao retroativa "
+            "voltaria a ser carimbada com a hora atual")
+        dados = cl.por_hora()
+        # se ha dados, as horas precisam ser plausiveis
+        for h in dados:
+            assert 0 <= h <= 23, f"hora invalida no log: {h}"
+    except AssertionError as e:
+        err(f"connector_log: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"connector_log: falha ao carregar/testar - {e}")
+
     # 4) a metodologia precisa manter a cascata de extracao explicita (v18).
     # Bug de processo real: por semanas o doc definia "metodo v9 = Nimble" e
     # caia direto para WebSearch, sem nunca citar Exa/Tavily - que estavam
@@ -304,7 +327,7 @@ def main():
     # redirecionar a execucao para a metodologia real, versionada em git.
     print("=" * 68)
     print("ROTA OBRIGATORIA: a fonte da verdade da metodologia e")
-    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v21)")
+    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v22)")
     print("Se o prompt desta execucao veio embutido na trigger agendada, ele")
     print("esta DESATUALIZADO - leia o arquivo acima e siga o fluxo de la.")
     print("Diferencas que o texto embutido antigo NAO tem: varredura por")

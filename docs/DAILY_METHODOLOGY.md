@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v15-b (30/07/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v22 (31/07/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -382,6 +382,30 @@ topo — são as próximas a testar quando os conectores voltarem.
 automaticamente, mas não garante. Se todas as casas resistirem à extração, o
 sistema opera em modo PE-first (v17-3) — que não depende de odds — e o PDF
 continua existindo como último recurso, não como rotina.
+
+(35) v22 (31/07, noite): **descobrir a JANELA certa em vez de chutar o
+horário.** Fechamento do dia: os conectores ficaram fora às 05h (execução
+diária), voltaram ~09h40 UTC por uma janela curta — a única em que a extração
+funcionou o dia inteiro — e caíram de novo, seguindo fora até 21h49 UTC.
+
+O horário da trigger (05h BRT) nunca foi escolhido por evidência de quando as
+ferramentas funcionam; foi conveniência. Isso faz perder dias inteiros por
+azar de timing. **`scripts/connector_log.py`** passa a acumular cada checagem
+(timestamp UTC + estado dos três) e `--janelas` mostra em quais horas os
+conectores costumam estar no ar. `--recomendar` só sugere mover a trigger com
+**amostra ≥15 checagens** e janela claramente melhor — abaixo disso, imprime
+que a amostra é pequena e manda manter (mesma disciplina anti-overfitting do
+item 8.1: não mudar critério por ruído).
+
+**Toda execução diária DEVE registrar sua checagem de conectores.** É de graça
+e é o que transforma "os conectores oscilam" em "os conectores costumam estar
+no ar às HH:00" — que é o que permite automatizar de verdade.
+
+Bug pego na construção: registrar várias observações do dia de uma vez
+carimbava todas com a hora ATUAL (21h), fazendo o log afirmar que 21h tinha
+disponibilidade quando a janela real foi 09h40. Log com hora errada é pior que
+log nenhum — orientaria a trigger para o horário errado. Corrigido com o
+parâmetro `quando` para observação retroativa, e travado com teste.
 
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17
