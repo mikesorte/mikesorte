@@ -214,6 +214,33 @@ def main():
     except Exception as e:
         err(f"parse_odds_pdf: falha ao carregar/testar - {e}")
 
+    # 3e) regressao no parser de fixtures globais (v20). Canal PROVADO em
+    # 31/07: tavily_extract le worldfootball.net (server-rendered) e rendeu
+    # 188 jogos em 75 competicoes no dia em que a execucao havia declarado
+    # "1 jogo elegivel". Ancora = URL do match-report, que carrega competicao
+    # e times de forma estruturada.
+    try:
+        from parse_fixtures import parse_dump
+        amostra = (
+            "Vålerenga IF\nVIF\n19:00\n[-:-](https://www.worldfootball.net/match-report/"
+            "co129/norway-eliteserien/ma11796943/valerenga-if_hamarkameratene/)\n"
+            "ART\n00:00\n[0:1](https://www.worldfootball.net/match-report/"
+            "co1458/nicaragua-liga-primera/ma12288979/art-municipal-jalapa_real-esteli-fc/)\n"
+        )
+        js = parse_dump(amostra)
+        assert len(js) == 2, f"parse_fixtures deveria achar 2 jogos, achou {len(js)}"
+        assert js[0]["casa"] == "Valerenga If", f"casa errada: {js[0]['casa']}"
+        assert js[0]["fora"] == "Hamarkameratene", f"fora errado: {js[0]['fora']}"
+        assert js[0]["competicao"] == "Norway Eliteserien", f"competicao errada: {js[0]['competicao']}"
+        assert js[0]["hora"] == "19:00", f"hora errada: {js[0]['hora']}"
+        # jogo encerrado precisa ser distinguivel de agendado
+        assert js[1]["placar"] == "0:1", f"placar nao capturado: {js[1]['placar']}"
+        assert js[0]["placar"] in (None, "-:-"), "jogo agendado nao deveria ter placar"
+    except AssertionError as e:
+        err(f"parse_fixtures: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"parse_fixtures: falha ao carregar/testar - {e}")
+
     # 4) a metodologia precisa manter a cascata de extracao explicita (v18).
     # Bug de processo real: por semanas o doc definia "metodo v9 = Nimble" e
     # caia direto para WebSearch, sem nunca citar Exa/Tavily - que estavam
@@ -236,7 +263,7 @@ def main():
     # redirecionar a execucao para a metodologia real, versionada em git.
     print("=" * 68)
     print("ROTA OBRIGATORIA: a fonte da verdade da metodologia e")
-    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v19)")
+    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v20)")
     print("Se o prompt desta execucao veio embutido na trigger agendada, ele")
     print("esta DESATUALIZADO - leia o arquivo acima e siga o fluxo de la.")
     print("Diferencas que o texto embutido antigo NAO tem: varredura por")

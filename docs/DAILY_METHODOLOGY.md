@@ -286,6 +286,57 @@ malformado — irrelevante, pois não analisamos in-play.
 Ordem de preferência do canal de odds passa a ser: cascata v18 (Nimble → Exa
 → Tavily) → **PDF exportado pelo usuário (v19)** → sem Aposta de Valor.
 
+(33) v20 (31/07, tarde): **cascata testada ao vivo — resultado real, método
+padrão corrigido.** Os três conectores voltaram e a cascata v18 foi executada
+de verdade contra a página de odds da Betano
+(`/odds/fk-bodo-glimt-lillestrom-sk/87735729/`):
+
+| Ferramenta | Resultado real |
+|---|---|
+| `nimble_search` | ✅ acha a URL exata da página de odds |
+| `nimble_search` (`search_depth=deep`) | ⚠️ confirma que os mercados existem (Total de Gols, Ambas Marcam, Empate Anula, Handicap) mas **não devolve os números** |
+| `nimble_extract` (síncrono) | ❌ **timeout de 60s** — limite do cliente MCP, com ou sem `wait` |
+| `mcp__Exa__web_fetch_exa` | ❌ devolve só a casca da página (não renderiza JS) |
+| `mcp__Tavily__tavily_extract` (`advanced`) | ❌ `Failed to fetch url` em `betano.bet.br` |
+| `nimble_extract_async` | ✅ aceita a task e processa fora de banda |
+
+**Correção do método padrão (substitui o "método v9"):** para páginas de odds
+da casa, o caminho é **`nimble_extract_async` + polling de
+`nimble_task_results`**, NÃO o `nimble_extract` síncrono. A página é pesada
+(SPA com centenas de mercados) e estoura o limite de 60s do cliente de forma
+consistente — não é falha intermitente, é característica da página. O
+síncrono continua válido para páginas leves (estatística, notícia).
+
+**Exa e Tavily não substituem o Nimble para odds** — nenhum dos dois renderiza
+o JS da casa. A cascata v18 continua correta como ordem de tentativa, mas com
+a expectativa calibrada: para ODDS, na prática só o Nimble (async) entrega;
+Exa/Tavily servem para páginas estáticas de estatística. Isso é medição, não
+suposição.
+
+**Regra prática:** ao extrair odds, disparar o async ANTES de outras tarefas
+da execução (leva ~30s a alguns minutos), seguir trabalhando, e recolher o
+resultado depois — em vez de bloquear a execução esperando. Em 31/07 o async
+da Betano seguia pendente após ~5 min; não bloquear a execução por ele.
+
+**ROTEAMENTO POR TIPO DE PÁGINA (a descoberta mais útil do dia):** a cascata
+não é uma fila única — cada ferramenta serve a um tipo de página.
+
+| Tipo de página | Ferramenta que FUNCIONA (medido) |
+|---|---|
+| Fixtures/estatística (server-rendered: worldfootball, etc.) | **Tavily `tavily_extract`** ✅ |
+| Odds da casa (SPA pesado: betano.bet.br) | Nimble `nimble_extract_async` (lento) ou **PDF exportado (v19)** |
+| Descoberta de URL | Nimble `nimble_search` ✅ |
+| Páginas dinâmicas em geral | Exa ❌ (devolve só a casca, não renderiza JS) |
+
+**`scripts/parse_fixtures.py`** (v20) converte um dump do Tavily sobre
+`worldfootball.net/matches-today/dnYYYY-MM-DD/` na lista global de jogos.
+Validado em 31/07: **188 jogos em 75 competições** — no mesmo dia em que a
+execução matinal declarou "1 jogo elegível". Só nas ligas que o
+`league_calendar.py` marca como prioritárias havia 3 da Eliteserien (a
+manchete só mostrara 2), 2 da Irlanda Premier, 3 da Finlândia, Estônia,
+Dinamarca e Escócia. Este passa a ser o método padrão de varredura ampla
+quando o Nimble não entrega o catálogo da casa.
+
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17
 colunas — vírgula não escapada dentro do campo `casa` (ex.: `Superbet (odds
