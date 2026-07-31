@@ -188,6 +188,20 @@ def main():
         err(f"league_calendar: falha ao carregar/testar - {e}")
 
     # relatorio
+    # Banner de rota (v17-d): a trigger agendada ainda carrega um prompt
+    # EMBUTIDO e desatualizado (v13) porque o servidor Claude_Code_Remote esta
+    # fora ha dias e update_trigger nao pode ser aplicado. Este script roda no
+    # passo 1 de QUALQUER versao do fluxo - entao e o ponto mais confiavel para
+    # redirecionar a execucao para a metodologia real, versionada em git.
+    print("=" * 68)
+    print("ROTA OBRIGATORIA: a fonte da verdade da metodologia e")
+    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v17)")
+    print("Se o prompt desta execucao veio embutido na trigger agendada, ele")
+    print("esta DESATUALIZADO - leia o arquivo acima e siga o fluxo de la.")
+    print("Diferencas que o texto embutido antigo NAO tem: varredura por")
+    print("catalogo e nao por manchete (v17), PE-first sem odds (v17),")
+    print("nao competir com a casa no 1X2 (v17-b).")
+    print("=" * 68)
     print("=== AUTO-DIAGNOSTICO DO SISTEMA ===")
     print(f"apostas_ledger: {len(apostas)} linhas | pe_ledger: {len(pes)} linhas")
     for w in WARNINGS:
