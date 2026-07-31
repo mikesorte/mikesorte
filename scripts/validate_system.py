@@ -187,6 +187,33 @@ def main():
     except Exception as e:
         err(f"league_calendar: falha ao carregar/testar - {e}")
 
+    # 3d) regressao no parser de PDF da casa (v19) - canal de ultimo recurso
+    # quando todos os conectores estao fora. Validado contra o export real da
+    # Betano de 29/07 (31 eventos, nomes/odds corretos).
+    try:
+        from parse_odds_pdf import parse_eventos
+        amostra = [
+            "29/07 19:30", "Internacional", "Flamengo",
+            "Brasil - Brasileirão - Série A Betano", "CA TURBINADA",
+            "1", "3.90", "X", "3.50", "2", "2.07",
+            "29/07 19:00", "Vasco da Gama", "Independiente Medellin",
+            "Copa Sul-americana", "Primeiro jogo: 2-2",
+            "1", "1.60", "X", "4.35", "2", "6.00",
+        ]
+        evs = parse_eventos(amostra)
+        assert len(evs) == 2, f"parser de PDF deveria achar 2 eventos, achou {len(evs)}"
+        assert evs[0]["casa"] == "Internacional", f"casa errada: {evs[0]['casa']}"
+        assert evs[0]["fora"] == "Flamengo", f"fora errado: {evs[0]['fora']}"
+        assert evs[0]["odds"] == [3.90, 3.50, 2.07], f"odds erradas: {evs[0]['odds']}"
+        assert evs[1]["casa"] == "Vasco da Gama", f"casa errada: {evs[1]['casa']}"
+        assert evs[1]["odds"] == [1.60, 4.35, 6.00], f"odds erradas: {evs[1]['odds']}"
+        # selo promocional nao pode virar nome de time (bug real da 1a versao)
+        assert "TURBINADA" not in evs[0]["fora"], "selo promocional virou nome de time"
+    except AssertionError as e:
+        err(f"parse_odds_pdf: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"parse_odds_pdf: falha ao carregar/testar - {e}")
+
     # 4) a metodologia precisa manter a cascata de extracao explicita (v18).
     # Bug de processo real: por semanas o doc definia "metodo v9 = Nimble" e
     # caia direto para WebSearch, sem nunca citar Exa/Tavily - que estavam
@@ -209,7 +236,7 @@ def main():
     # redirecionar a execucao para a metodologia real, versionada em git.
     print("=" * 68)
     print("ROTA OBRIGATORIA: a fonte da verdade da metodologia e")
-    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v18)")
+    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v19)")
     print("Se o prompt desta execucao veio embutido na trigger agendada, ele")
     print("esta DESATUALIZADO - leia o arquivo acima e siga o fluxo de la.")
     print("Diferencas que o texto embutido antigo NAO tem: varredura por")

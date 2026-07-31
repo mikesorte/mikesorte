@@ -256,6 +256,36 @@ conta mas desabilitados NESTE CHAT. Reabilitar Nimble/Exa/Tavily nas
 configurações de conectores do chat restaura a capacidade de Aposta de Valor.
 Enquanto isso não acontece, o sistema opera em modo PE-first (v17-3).
 
+(32) v19 (31/07): **canal PDF — leitura de odds sem nenhum conector.**
+Teste exaustivo de TODOS os canais de rede, medido e registrado:
+
+| Canal | Resultado |
+|---|---|
+| Nimble / Exa / Tavily | não carregam (desabilitados no chat) |
+| WebFetch | 403 em Betano, worldfootball **e Wikipedia** |
+| curl / wget / urllib | 403 CONNECT (só `pypi.org` e `registry.npmjs.org` passam) |
+| Playwright/Chromium | `ERR_TUNNEL_CONNECTION_FAILED` |
+| WebSearch | **funciona** (descoberta/estatística, não lê conteúdo dinâmico) |
+| Google Drive (conector) | **funciona** (lê arquivos, inclusive PDF) |
+| Upload no chat | **funciona** (comprovado em 29/07) |
+
+A política de rede é **allowlist de hosts**. Conclusão importante: converter
+página em PDF *do nosso lado* não resolve nada — a falha é no **fetch**, não
+na renderização; não chega um byte do host. O que resolve é o **usuário
+trazer a página para dentro**.
+
+**`scripts/parse_odds_pdf.py`** transforma isso em pipeline repetível: o
+usuário exporta a página da casa (Imprimir → Salvar como PDF), anexa no chat
+ou salva no Drive, e o script extrai todos os eventos com 1X2 + de-vig
+automático. Validado contra o export real da Betano de 29/07: **31 eventos**,
+nomes/competições/horários/odds corretos (Vasco x Medellín 1.60/4.35/6.00 e
+Internacional x Flamengo 3.90/3.50/2.07 conferidos contra o texto do PDF).
+Limitação conhecida: jogo **ao vivo** não tem âncora de horário e sai
+malformado — irrelevante, pois não analisamos in-play.
+
+Ordem de preferência do canal de odds passa a ser: cascata v18 (Nimble → Exa
+→ Tavily) → **PDF exportado pelo usuário (v19)** → sem Aposta de Valor.
+
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17
 colunas — vírgula não escapada dentro do campo `casa` (ex.: `Superbet (odds
