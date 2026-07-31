@@ -236,6 +236,22 @@ def main():
         # jogo encerrado precisa ser distinguivel de agendado
         assert js[1]["placar"] == "0:1", f"placar nao capturado: {js[1]['placar']}"
         assert js[0]["placar"] in (None, "-:-"), "jogo agendado nao deveria ter placar"
+
+        # (v21-c) data explicita da pagina TEM que ser capturada. Bug real de
+        # 31/07: paginas de classificacao trazem jogos de outras datas
+        # ("01.08.2026 16:00") e, fundidas ao dump de matches-today, faziam
+        # jogo de AMANHA ser reportado como de HOJE - erro de identidade
+        # (regra 0). Fredrikstad x Sandefjord entrou como 31/07 sendo 01/08.
+        com_data = (
+            "01.08.2026 16:00\nFredrikstad FK\n"
+            "[-:-](https://www.worldfootball.net/match-report/"
+            "co129/norway-eliteserien/ma999/fredrikstad-fk_sandefjord-fotball/)\n"
+        )
+        jd = parse_dump(com_data)
+        assert len(jd) == 1, f"deveria achar 1 jogo, achou {len(jd)}"
+        assert jd[0]["data"] == "2026-08-01", (
+            f"data explicita da pagina nao capturada: {jd[0]['data']} "
+            "- jogo de outra data vazaria como se fosse de hoje")
     except AssertionError as e:
         err(f"parse_fixtures: REGRESSAO DETECTADA - {e}")
     except Exception as e:
