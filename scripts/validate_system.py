@@ -28,6 +28,25 @@ def check_csv(path, required_cols, id_col="id"):
     if not os.path.exists(full):
         err(f"{path}: ARQUIVO AUSENTE")
         return []
+
+    # (v17) contagem de campos por linha ANTES de qualquer DictReader.
+    # Bug real de 30-31/07: virgula nao escapada dentro do campo 'casa'
+    # (ex.: Superbet (odds reais, mesma casa 3 lados)) gerou linhas com 18-19
+    # campos num CSV de 17 colunas. O DictReader engole o excedente na chave
+    # None e desloca TODAS as colunas seguintes - o resultado do jogo foi
+    # parar na coluna acerto_erro. O diagnostico passava limpo porque so
+    # checava presenca de coluna no header e unicidade de id.
+    with open(full, newline="", encoding="utf-8") as f:
+        raw = list(csv.reader(f))
+    if raw:
+        ncols = len(raw[0])
+        for i, row in enumerate(raw[1:], start=2):
+            if not row:
+                continue
+            if len(row) != ncols:
+                err(f"{path}: linha {i} com {len(row)} campos (esperado {ncols}) "
+                    f"- provavel virgula nao escapada; campo com virgula PRECISA de aspas")
+
     with open(full, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     if not rows:
@@ -36,6 +55,10 @@ def check_csv(path, required_cols, id_col="id"):
     missing = [c for c in required_cols if c not in rows[0]]
     if missing:
         err(f"{path}: colunas ausentes {missing}")
+    # campo extra capturado pelo DictReader = linha malformada
+    for r in rows:
+        if None in r:
+            err(f"{path}: id={r.get(id_col)} tem campos alem do header (linha malformada)")
     ids = [r.get(id_col) for r in rows]
     if len(ids) != len(set(ids)):
         err(f"{path}: IDs duplicados")

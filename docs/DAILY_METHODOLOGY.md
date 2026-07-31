@@ -199,6 +199,38 @@ metodologia tem um caminho explícito para esse caso.
    emitido** mesmo com o novo processo — o correto. "Mais PEs" é resultado de
    coletar mais dado, nunca de baixar o critério.
 
+(29) v17-b (31/07): **correção de uma lição errada repetida 4 dias seguidos.**
+De 28 a 31/07 registrei como "achado metodológico" que meu Dixon-Coles com
+lambdas proxy divergia do 1X2 justo de mercado em 8-13pp, tratando isso como
+um mistério de calibração a resolver. **A leitura estava errada.** O mercado
+1X2 é o produto mais líquido e mais eficiente da casa, precificado com
+informação que eu não tenho; meus lambdas são chutados à mão. É esperado que
+eu perca essa comparação — não é um achado, é a premissa. A lição correta,
+que a regra 8 e a 6.2-f já diziam: **não competir com a casa onde ela é mais
+forte.** O ledger confirma o erro na prática — 50% das linhas testadas são
+1X2, e os dois últimos dias testaram 1X2 e MAIS NADA.
+
+**Regra operacional:** um dia cujo teste foi só 1X2 é um dia mal executado,
+mesmo que conclua "sem edge" corretamente. Antes de fechar qualquer jogo
+pesquisado a fundo, tentar explicitamente as famílias menos eficientes —
+escanteios, cartões, faltas, totais por equipe, faixas de gols, props — que
+são onde a regra 8 diz que o valor vive. `ledger_stats.py` agora imprime a
+distribuição por família e ALERTA quando 1X2 passa de 50%; esse alerta deve
+ser tratado como pendência de processo, não ignorado.
+
+(30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
+corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17
+colunas — vírgula não escapada dentro do campo `casa` (ex.: `Superbet (odds
+reais, mesma casa 3 lados)`). O `DictReader` deslocou todas as colunas
+seguintes e o placar do jogo foi parar na coluna `acerto_erro`. O
+auto-diagnóstico passava limpo porque só checava presença de coluna no header
+e unicidade de id — nunca contagem de campos por linha. Corrigido nos dois
+sentidos: linhas reparadas com aspas, e `validate_system.py` agora conta
+campos por linha ANTES do DictReader e rejeita chave `None`. Validado com
+teste negativo (reintroduzir a corrupção → exit 1; restaurar → limpo).
+**Regra:** todo campo de texto livre que possa conter vírgula vai entre
+aspas, sempre.
+
 ## Casas licenciadas (SPA/MF)
 
 Betano, Bet Nacional, Superbet, Bet365, Sportingbet, KTO, Novibet,

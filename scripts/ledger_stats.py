@@ -72,6 +72,43 @@ def main():
     else:
         print("CLV medio: SEM DADOS (nenhuma odd de fechamento registrada ainda)")
 
+    # --- concentracao por familia de mercado (v17)
+    # Achado de 31/07: os ultimos dias testaram 1X2 QUASE EXCLUSIVAMENTE - o
+    # mercado MAIS eficiente e liquido - usando lambdas proxy (a entrada mais
+    # fraca). A regra 8 e a 6.2-f dizem o oposto: 1X2 nao e default, o valor
+    # tende a viver nos mercados menos eficientes. Isto fica visivel aqui para
+    # nao voltar a acontecer silenciosamente.
+    FAMILIAS = {
+        "1X2": ("1x2",),
+        "Gols/Totais": ("total de gols", "over", "under", "gols"),
+        "BTTS": ("btts", "ambas"),
+        "Escanteios": ("escanteio", "cantos"),
+        "Cartoes/Faltas": ("cartao", "cartoes", "falta"),
+        "DNB/AH/DC": ("dnb", "handicap", "dupla chance", "empate anula"),
+        "Props": ("prop", "finalizac", "desarme", "chutes"),
+    }
+    contagem = {k: 0 for k in FAMILIAS}
+    for r in detail:
+        merc = (r.get("mercado") or "").lower()
+        for fam, chaves in FAMILIAS.items():
+            if any(c in merc for c in chaves):
+                contagem[fam] += 1
+
+    testados = sum(contagem.values())
+    print("\n=== COBERTURA POR FAMILIA DE MERCADO (regra 8) ===")
+    if testados:
+        for fam, qtd in sorted(contagem.items(), key=lambda kv: -kv[1]):
+            if qtd:
+                print(f"{fam}: {qtd} ({qtd/testados:.0%} das linhas)")
+        p1x2 = contagem["1X2"] / testados
+        if p1x2 > 0.5:
+            print(f"\nALERTA: {p1x2:.0%} das linhas sao 1X2 - o mercado MAIS eficiente.")
+            print("A regra 8 diz que o valor tende a viver nos MENOS eficientes")
+            print("(escanteios, cartoes, faltas, props, totais por equipe).")
+            print("Testar so 1X2 e competir com a casa onde ela e mais forte.")
+    else:
+        print("(nenhuma linha de detalhe ainda)")
+
     print("\n=== PALPITES ESTATISTICOS (fonte: data/pe_ledger.csv) ===")
     for faixa in ("Alta", "Moderada", "Baixa"):
         rows = [r for r in pes if r.get("confianca") == faixa]
@@ -83,6 +120,12 @@ def main():
         res = occ + nao
         line = f"{faixa}: {occ}/{res} ocorreram" if res else f"{faixa}: 0 resolvidos"
         print(f"{line} (arquivado/retirado/pendente: {other}, total emitido: {len(rows)})")
+
+    # guarda contra shadowing acidental de 'n' por blocos inseridos acima
+    # (bug real introduzido e pego em 31/07: um 'for fam, n in ...' sobrescreveu
+    # o N do ledger e o aviso final passou a imprimir N=0)
+    assert n == agg_a + agg_e + det_a + det_e, \
+        f"N corrompido antes do aviso final ({n}) - variavel sobrescrita?"
 
     if n < 50:
         print(f"\nAviso: N={n} < 50 (primeiro checkpoint). Nenhuma conclusao estatistica valida ainda.")
