@@ -187,6 +187,20 @@ def main():
     except Exception as e:
         err(f"league_calendar: falha ao carregar/testar - {e}")
 
+    # 4) a metodologia precisa manter a cascata de extracao explicita (v18).
+    # Bug de processo real: por semanas o doc definia "metodo v9 = Nimble" e
+    # caia direto para WebSearch, sem nunca citar Exa/Tavily - que estavam
+    # instalados o tempo todo. Se alguem resumir o doc e apagar a cascata, o
+    # sistema volta a ignorar dois conectores disponiveis.
+    meth = os.path.join(ROOT, "docs/DAILY_METHODOLOGY.md")
+    if os.path.exists(meth):
+        with open(meth, encoding="utf-8") as f:
+            txt = f.read().lower()
+        for termo in ("exa", "tavily", "cascata"):
+            if termo not in txt:
+                err(f"docs/DAILY_METHODOLOGY.md: perdeu referencia a '{termo}' "
+                    f"- a cascata de extracao (v18) precisa citar os 3 conectores")
+
     # relatorio
     # Banner de rota (v17-d): a trigger agendada ainda carrega um prompt
     # EMBUTIDO e desatualizado (v13) porque o servidor Claude_Code_Remote esta
@@ -195,7 +209,7 @@ def main():
     # redirecionar a execucao para a metodologia real, versionada em git.
     print("=" * 68)
     print("ROTA OBRIGATORIA: a fonte da verdade da metodologia e")
-    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v17)")
+    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v18)")
     print("Se o prompt desta execucao veio embutido na trigger agendada, ele")
     print("esta DESATUALIZADO - leia o arquivo acima e siga o fluxo de la.")
     print("Diferencas que o texto embutido antigo NAO tem: varredura por")

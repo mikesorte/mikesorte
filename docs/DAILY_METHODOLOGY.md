@@ -218,6 +218,44 @@ são onde a regra 8 diz que o valor vive. `ledger_stats.py` agora imprime a
 distribuição por família e ALERTA quando 1X2 passa de 50%; esse alerta deve
 ser tratado como pendência de processo, não ignorado.
 
+(31) v18 (31/07): **cascata de extração — parar de tratar Nimble como único
+caminho.** Usuário apontou corretamente: há TRÊS conectores de leitura de
+página instalados (Nimble, Exa, Tavily), mas a metodologia definia o "método
+v9" como *nimble_search + nimble_extract* e caía direto para WebSearch quando
+o Nimble falhava. Exa e Tavily nunca foram escritos como alternativa — logo,
+nunca seriam usados mesmo quando disponíveis. Falha de processo real.
+
+**Cascata obrigatória para leitura de página / odds (tentar nesta ordem, e
+declarar no relatório qual nível foi usado):**
+
+1. **Nimble** — `nimble_search` + `nimble_extract` na página da casa
+   licenciada. Melhor opção: retorna o JSON estruturado real
+   (`window["initial_state"]`) com todos os mercados.
+2. **Exa** — `mcp__Exa__web_fetch_exa` para ler a página, `web_search_exa`
+   para localizar. Nunca foi testado neste projeto por omissão da
+   metodologia, não por falha técnica. Deve ser a 2ª tentativa sempre.
+3. **Tavily** — terceira opção (exige autorização OAuth; se pedir auth,
+   reportar ao usuário e seguir).
+4. **WebSearch** com `allowed_domains` — só para DESCOBERTA (fixtures,
+   estatística, notícia). Não lê conteúdo dinâmico, então **não serve para
+   odds de dois lados**.
+
+**Checar `ListConnectors` E tentar carregar via `ToolSearch`** — o flag
+`enabledInChat` e a disponibilidade real divergem (já observado). O que vale
+é a ferramenta carregar.
+
+**Estado verificado em 31/07:** os três conectores estavam `enabledInChat:
+false` e nenhum carregava via ToolSearch. `WebFetch` foi re-testado (a regra
+v6 dizia "bloqueado, não retentar") e retornou 403 em Betano, worldfootball
+E Wikipedia — bloqueio de política de rede, não do site; regra v6 confirmada,
+mantida. `curl` direto também 403 no proxy. Conclusão: sem os conectores, só
+WebSearch — e Apostas de Valor ficam estruturalmente indisponíveis (v17-4).
+
+**Ação que só o usuário pode tomar:** os conectores aparecem conectados na
+conta mas desabilitados NESTE CHAT. Reabilitar Nimble/Exa/Tavily nas
+configurações de conectores do chat restaura a capacidade de Aposta de Valor.
+Enquanto isso não acontece, o sistema opera em modo PE-first (v17-3).
+
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17
 colunas — vírgula não escapada dentro do campo `casa` (ex.: `Superbet (odds
@@ -255,8 +293,11 @@ CONSOLIDADO; (B) PDF anexado; (C) resumo curto no chat (3-5 linhas).
 
 1. `git pull --rebase`; `python3 scripts/validate_system.py` (corrigir
    erros, anotar pendências).
-2. `ListConnectors` (Nimble/Tavily/Exa — status a reportar; se
-   habilitados, método v9 é o padrão).
+2. `ListConnectors` **E** `ToolSearch` para os três (Nimble, Exa, Tavily) —
+   o flag `enabledInChat` diverge da disponibilidade real, então o que vale é
+   a ferramenta CARREGAR. Reportar o status dos três, não só do Nimble. Se
+   qualquer um carregar, usar a cascata de extração (v18) — nunca pular
+   direto para WebSearch só porque o Nimble falhou.
 3. Resolver filas 14.4/14.5 + resultados de ontem + BUSCAR ODDS DE
    FECHAMENTO de ontem → preencher CLV no ledger (`clv()` do motor).
 4. **VARREDURA AMPLA — dois caminhos, nunca "dia fraco" sem ter feito os dois
@@ -284,6 +325,10 @@ CONSOLIDADO; (B) PDF anexado; (C) resumo curto no chat (3-5 linhas).
    região — não só Brasileirão. Declarar "dia fraco" só é aceitável depois de
    4a + 4c terem sido executados e reportados.
 5. Odds reais (método v9 quando disponível; senão WebSearch triangulado).
+5.0. **Cascata de extração (v18) — obrigatória antes de desistir de odds:**
+   Nimble → Exa (`web_fetch_exa`) → Tavily → WebSearch. Declarar no relatório
+   qual nível foi usado. "Nimble fora" NÃO é justificativa para pular para
+   WebSearch sem tentar Exa e Tavily.
 5.1. **Se os conectores estiverem fora (v17):** não gastar o orçamento
    inteiro tentando achar odds de dois lados que não vão aparecer. Após 2
    tentativas frustradas, realocar o esforço para coleta de estatística dos
