@@ -148,6 +148,40 @@ def main():
         assert e["participants"] == "Time A - Time B", f"participants errado: {e['participants']}"
         assert is_liga_menor("Champions League - Qualificação", LIGA_MENOR_DEFAULT), "liga menor nao detectada (qualif)"
         assert not is_liga_menor("Brasileirao Serie A", LIGA_MENOR_DEFAULT), "falso positivo de liga menor"
+
+        # (v24) filtros de escopo sobre o catalogo bruto da casa. Auditoria de
+        # 01/08 sobre 542 eventos reais: 64 femininos (decisao 9 exclui), 28
+        # base/reserva, 49 amistosos (regra 0), 39 de outro dia BRT. Sem isso
+        # o catalogo ENGANA - parece cobertura, mas 33% nao pode virar aposta.
+        from scan_odds import eh_feminino, eh_base_ou_reserva, eh_amistoso, filtrar_elegiveis
+        def _ev(p, c=""):
+            return {"participants": p, "competition": c}
+        assert eh_feminino(_ev("Club Tijuana (F) - CF Monterrey (F)", "Liga MX Femenil (F)")), \
+            "feminino nao detectado (decisao 9 do usuario)"
+        # ARMADILHA REAL: clubes ADULTOS com 'Junior(s)' no nome nao podem ser
+        # descartados como base. O filtro inicial os pegava por engano.
+        assert not eh_base_ou_reserva(_ev("CA Belgrano - Argentinos Juniors", "Liga Profesional")), \
+            "Argentinos Juniors (clube adulto) classificado como base"
+        assert not eh_base_ou_reserva(_ev("Boca Juniors - River Plate", "Liga Profesional")), \
+            "Boca Juniors (clube adulto) classificado como base"
+        assert not eh_base_ou_reserva(_ev("Atlético Junior - Millonarios FC", "Primera A")), \
+            "Atletico Junior (clube adulto) classificado como base"
+        # reserva de verdade: sufixo II/B avaliado POR TIME (bug real: testar na
+        # string concatenada com a competicao quebrava a ancora de fim)
+        assert eh_base_ou_reserva(_ev("Bremer SV - Hannover 96 II", "Regionalliga Norte")), \
+            "time reserva com sufixo II nao detectado"
+        assert eh_base_ou_reserva(_ev("Real Madrid B - Getafe", "Primera Federacion")), \
+            "time reserva com sufixo B nao detectado"
+        assert eh_amistoso(_ev("Willem II - OFI Creta", "Jogos amistosos em destaque")), \
+            "amistoso nao detectado (regra 0)"
+        assert not eh_amistoso(_ev("Inter Miami CF - Columbus Crew SC", "MLS")), \
+            "falso positivo de amistoso"
+        # jogo de outro dia BRT tem que sair (regra 0 - 'UTC engana')
+        ontem = {"participants": "A - B", "competition": "X",
+                 "start_time": "1785500000000"}
+        el, mot = filtrar_elegiveis([ontem], data_brt="2026-08-01",
+                                    agora_ms=1785584100000)
+        assert mot["outro_dia"] == 1 and not el, "jogo de outro dia BRT nao filtrado"
     except AssertionError as e:
         err(f"scan_odds: REGRESSAO DETECTADA - {e}")
     except Exception as e:
@@ -327,7 +361,7 @@ def main():
     # redirecionar a execucao para a metodologia real, versionada em git.
     print("=" * 68)
     print("ROTA OBRIGATORIA: a fonte da verdade da metodologia e")
-    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v23)")
+    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v24)")
     print("Se o prompt desta execucao veio embutido na trigger agendada, ele")
     print("esta DESATUALIZADO - leia o arquivo acima e siga o fluxo de la.")
     print("Diferencas que o texto embutido antigo NAO tem: varredura por")

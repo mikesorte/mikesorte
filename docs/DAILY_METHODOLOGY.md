@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v23 (01/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v24 (01/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -458,6 +458,40 @@ janelas) sem ter testado os PARÂMETROS da ferramenta que já tinha na mão. O
 `driver` estava documentado na descrição do próprio `nimble_extract` desde o
 início. Contorno é aceitável enquanto a causa raiz não é conhecida; deixa de
 ser quando nunca se tentou ler o manual da ferramenta.
+
+(37) v24 (01/08): **auditoria do catálogo — "542 eventos" era número
+inflado.** Usuário pediu para testar de várias formas antes de confiar.
+Certo: em vez de repetir a mesma extração, auditei o resultado que já tinha.
+
+**Verificações que PASSARAM** (dão confiança no que sobrou): zero duplicatas,
+zero campos faltando, e **todos os 542 overrounds dentro de [1,005; 1,25]** —
+sinal forte de que as odds são reais e o de-vig está correto, não invenção do
+parser.
+
+**Contaminações encontradas (33% do bruto não podia virar aposta):**
+| Descarte | Qtd | Motivo |
+|---|---|---|
+| Feminino | 64 | decisão (9) do usuário exclui |
+| Amistoso | 49 | regra 0 (pré-temporada: escalação imprevisível) |
+| Outro dia BRT | 39 | regra 0 — "UTC engana" |
+| Base/reserva | 28 | dado fraco demais para modelar |
+| **Elegíveis reais** | **362** | de 542 brutos |
+
+`filtrar_elegiveis()` aplica tudo isso e devolve as contagens por motivo, para
+o relatório poder mostrar cobertura REAL em vez de número inflado.
+
+**Dois bugs meus, pegos pelo próprio teste:**
+1. O filtro de base/juvenil descartava **Argentinos Juniors**, **Boca Juniors**
+   e **Atlético Junior** — clubes ADULTOS cujo nome contém "Junior". Teria
+   jogado fora jogos legítimos de primeira divisão. "Junior" saiu do padrão.
+2. O sufixo de reserva (`II`/`B`) era testado na string
+   `participants + competition` concatenada, o que quebra a âncora de fim —
+   "Hannover 96 II" passava batido. Agora é avaliado **por time**.
+
+**Lição:** "542 eventos extraídos" parecia vitória e era parcialmente ilusão.
+Número grande de catálogo não é cobertura; cobertura é o que sobra depois das
+regras de escopo. Todo relatório deve mostrar bruto → descartes por motivo →
+elegíveis, nunca só o número maior.
 
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17

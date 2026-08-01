@@ -120,6 +120,93 @@ def is_liga_menor(competition, keywords):
     return any(kw in c for kw in keywords)
 
 
+# ---------------------------------------------------------------- filtros v24
+# A extracao bruta da casa traz MUITA coisa fora de escopo. Auditoria de
+# 01/08 sobre 542 eventos reais: 64 femininos (decisao 9 do usuario exclui),
+# 43 base/reserva, 64 de outro dia BRT, 92 ja iniciados. So 325 (60%) eram
+# elegiveis de verdade. Sem estes filtros o "catalogo" engana: parece
+# cobertura, mas 40% nao pode virar aposta.
+
+RE_FEMININO = re.compile(r"\(F\)|femin|\bwomen\b|\bladies\b|\bfem\b", re.I)
+
+# CUIDADO: "Junior"/"Juniors" NAO entra aqui - Argentinos Juniors e Atletico
+# Junior sao clubes ADULTOS. Filtro inicial os pegava por engano e teria
+# descartado jogos legitimos. Marcadores confiaveis de base/reserva:
+RE_BASE = re.compile(
+    r"\bU\s?1[5-9]\b|\bU\s?2[0-3]\b|\bsub[- ]?\d{2}\b|\byouth\b|\bjuvenil\b"
+    r"|\breserve[s]?\b|\bacademy\b|\bfuerzas basicas\b",
+    re.I)
+# sufixo de time reserva ("Hannover 96 II", "Real Madrid B") - precisa ser
+# testado em CADA time isoladamente. Testar na string concatenada
+# (participants + competition) quebra a ancora de fim, bug pego em 01/08.
+RE_SUFIXO_RESERVA = re.compile(r"\s(?:II|B)$", re.I)
+
+# regra 0 manda evitar amistoso de pre-temporada: escalacao imprevisivel,
+# rotacao pesada, motivacao baixa - o modelo nao tem como capturar isso.
+# Em 01/08 eram 49 dos 542 eventos (9%), quase 12% dos elegiveis.
+RE_AMISTOSO = re.compile(r"\bamistos|\bfriendly|\bfriendlies|pre-?season|pre-?temporada", re.I)
+
+
+def eh_amistoso(ev):
+    return bool(RE_AMISTOSO.search(ev.get("competition") or ""))
+
+
+def eh_feminino(ev):
+    txt = f"{ev.get('participants') or ''} {ev.get('competition') or ''}"
+    return bool(RE_FEMININO.search(txt))
+
+
+def eh_base_ou_reserva(ev):
+    part = ev.get("participants") or ""
+    txt = f"{part} {ev.get('competition') or ''}"
+    if RE_BASE.search(txt):
+        return True
+    # sufixo II/B avaliado por TIME, nao na string inteira
+    for time in part.split(" - "):
+        if RE_SUFIXO_RESERVA.search(time.strip()):
+            return True
+    return False
+
+
+def filtrar_elegiveis(eventos, data_brt=None, agora_ms=None):
+    """Aplica as regras de escopo do usuario sobre o catalogo bruto.
+
+    Descarta: feminino (decisao 9), base/reserva (dado fraco), jogo de outro
+    dia em horario de BRASILIA (regra 0 - 'UTC engana') e jogo ja iniciado
+    (regra 0 - 'nunca analisar jogo encerrado').
+
+    Devolve (elegiveis, motivos) onde motivos e um dict com as contagens.
+    """
+    from datetime import datetime, timedelta, timezone
+    BRT = timezone(timedelta(hours=-3))
+    hoje = data_brt or datetime.now(BRT).date().isoformat()
+    corte = agora_ms if agora_ms is not None else datetime.now(BRT).timestamp() * 1000
+
+    elegiveis, motivos = [], {"feminino": 0, "base_reserva": 0, "amistoso": 0,
+                              "outro_dia": 0, "ja_iniciado": 0}
+    for ev in eventos:
+        if eh_feminino(ev):
+            motivos["feminino"] += 1
+            continue
+        if eh_base_ou_reserva(ev):
+            motivos["base_reserva"] += 1
+            continue
+        if eh_amistoso(ev):
+            motivos["amistoso"] += 1
+            continue
+        ts = ev.get("start_time")
+        if ts:
+            dt = datetime.fromtimestamp(int(ts) / 1000, tz=BRT)
+            if dt.date().isoformat() != hoje:
+                motivos["outro_dia"] += 1
+                continue
+            if int(ts) < corte:
+                motivos["ja_iniciado"] += 1
+                continue
+        elegiveis.append(ev)
+    return elegiveis, motivos
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("dump_file")
