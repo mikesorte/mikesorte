@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v22 (31/07/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v23 (01/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -406,6 +406,58 @@ carimbava todas com a hora ATUAL (21h), fazendo o log afirmar que 21h tinha
 disponibilidade quando a janela real foi 09h40. Log com hora errada é pior que
 log nenhum — orientaria a trigger para o horário errado. Corrigido com o
 parâmetro `quando` para observação retroativa, e travado com teste.
+
+(36) v23 (01/08): **RESOLVIDO — extração automática de odds funcionando.**
+Depois de dias tratando "não consigo ler odds" como limitação externa, o teste
+sistemático das 9 casas encontrou a causa real e a solução.
+
+**Causa raiz (dupla, e eu diagnosticara errado antes):**
+1. **Geo-bloqueio.** As casas `.bet.br` são legalmente restritas ao Brasil e
+   as ferramentas saem de fora. Tavily devolveu bloqueio EXPLÍCITO em
+   Superbet ("Service is not available in this location"), EstrelaBet ("País
+   indisponível") e Sportingbet ("seu endereço IP foi bloqueado"). Eu vinha
+   chamando isso de "SPA pesado" — estava errado.
+2. **Driver fraco.** O `nimble_extract` usa por padrão o driver `vx6`, que não
+   dá conta do SPA e estourava os 60s do cliente. **Não era a página ser
+   pesada demais; era o driver ser fraco demais.**
+
+**A solução (validada, 01/08):**
+```
+nimble_extract(url, country="BR", driver="vx10", output_format="plain_text")
+```
+- `country="BR"` contorna o geo-bloqueio (confirmado: Superbet retornou o app
+  real em vez da página de bloqueio)
+- `driver="vx10"` elimina o timeout
+
+**Resultado medido:** a página **`betano.bet.br/sport/futebol/jogos-de-hoje/`**
+retornou **2.656.091 caracteres** e o `scan_odds.py` extraiu **542 eventos com
+1X2 e de-vig automático** — catálogo do dia inteiro, uma única chamada, sem
+nenhuma ação do usuário. Isto substitui o PDF manual (v19), que passa a ser
+apenas contingência.
+
+**Método padrão a partir de agora (substitui o v9 e a cascata v18 para
+ODDS):** `nimble_extract` na página `jogos-de-hoje` da Betano com
+`country=BR` + `driver=vx10`, depois `scan_odds.py` sobre o dump.
+
+**Mapa das outras casas (medido, não suposto):**
+| Casa | Estado |
+|---|---|
+| **Betano** | ✅ **funciona** (country=BR + vx10) |
+| Superbet | ⚠️ passa o geo-block mas exige verificação de GEOLOCALIZAÇÃO do navegador |
+| Bet Nacional | ⚠️ passa o geo-block; odds carregam via API pós-render |
+| Novibet / Betfair | ❌ só casca |
+| Sportingbet / EstrelaBet | ❌ geo-block duro |
+| KTO | ❌ página de marketing com odds antigas |
+| Bet365 | não testada (sem padrão de URL) |
+
+Betano basta — e ter as outras mapeadas evita repetir teste que já falhou.
+
+**Lição de método:** passei dias registrando "conector fora / SPA pesado /
+canal bloqueado" e construindo contornos (PDF manual, PE-first, log de
+janelas) sem ter testado os PARÂMETROS da ferramenta que já tinha na mão. O
+`driver` estava documentado na descrição do próprio `nimble_extract` desde o
+início. Contorno é aceitável enquanto a causa raiz não é conhecida; deixa de
+ser quando nunca se tentou ler o manual da ferramenta.
 
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17

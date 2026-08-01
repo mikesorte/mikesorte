@@ -327,7 +327,7 @@ def main():
     # redirecionar a execucao para a metodologia real, versionada em git.
     print("=" * 68)
     print("ROTA OBRIGATORIA: a fonte da verdade da metodologia e")
-    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v22)")
+    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v23)")
     print("Se o prompt desta execucao veio embutido na trigger agendada, ele")
     print("esta DESATUALIZADO - leia o arquivo acima e siga o fluxo de la.")
     print("Diferencas que o texto embutido antigo NAO tem: varredura por")

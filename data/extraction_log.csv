@@ -5,3 +5,13 @@ data,casa,ferramenta,resultado,jogo,nota
 2026-07-31,Betano,tavily_extract,bloqueio,Bodo/Glimt x Lillestrom,Failed to fetch url
 2026-07-31,Betano,pdf_export,ok,home 29/07,31 eventos com 1X2 extraidos do export do usuario
 2026-08-01,Betano,nimble_extract_async,bloqueio,execucao 01/08,"conector fora o dia todo, nao foi possivel tentar"
+2026-08-01,Superbet,tavily_extract,bloqueio,teste 01/08,GEO-BLOCK explicito: Service is not available in this location
+2026-08-01,EstrelaBet,tavily_extract,bloqueio,teste 01/08,GEO-BLOCK explicito: Pais indisponivel
+2026-08-01,Sportingbet,tavily_extract,bloqueio,teste 01/08,GEO-BLOCK explicito: seu endereco IP foi bloqueado
+2026-08-01,Bet Nacional,tavily_extract,casca,teste 01/08,"carregou nav/footer, odds via JS ausentes"
+2026-08-01,Novibet,tavily_extract,casca,teste 01/08,devolveu so politica de cookies
+2026-08-01,Betfair,tavily_extract,casca,teste 01/08,"so menu de navegacao, sem odds"
+2026-08-01,KTO,tavily_extract,parcial,teste 01/08,pagina de marketing carregou mas com odds ANTIGAS (jogos de julho ja encerrados) - nao serve
+2026-08-01,Betano,nimble_extract,ok,jogos-de-hoje 01/08,"BREAKTHROUGH: driver=vx10 + country=BR + pagina /sport/futebol/jogos-de-hoje/ -> 2.65M chars, 542 eventos com 1X2 e de-vig. O driver padrao vx6 era a causa dos timeouts de 60s."
+2026-08-01,Superbet,nimble_extract,parcial,teste 01/08,"country=BR contorna o geo-block (retornou app real, nao pagina de bloqueio) mas exige verificacao de GEOLOCALIZACAO do navegador - barreira mais forte"
+2026-08-01,Bet Nacional,nimble_extract,casca,teste 01/08,"country=BR passa o geo-block (95k chars, sem pagina de bloqueio) mas odds carregam via API pos-render"
