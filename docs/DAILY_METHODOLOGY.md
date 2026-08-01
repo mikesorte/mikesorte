@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v24 (01/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v25 (01/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -492,6 +492,41 @@ o relatório poder mostrar cobertura REAL em vez de número inflado.
 Número grande de catálogo não é cobertura; cobertura é o que sobra depois das
 regras de escopo. Todo relatório deve mostrar bruto → descartes por motivo →
 elegíveis, nunca só o número maior.
+
+(38) v25 (01/08): **validação cruzada da extração contra fonte
+independente.** Segunda camada de teste pedida pelo usuário: em vez de
+confiar no parser, conferir as odds extraídas contra terceiros.
+
+| Jogo | Betano (extraído) | Fonte independente | Δ |
+|---|---|---|---|
+| Inter Miami x Columbus | Miami **1,57** | 1,65 / 1,66 / 1,67 (3 fontes) | 5-6% |
+| Racing Club x Tigre | Racing **2,10** | 1,75 (bplay, casa argentina) | **20%** |
+
+**Identidade confirmada nos dois** (horário extraído bate com fonte externa:
+Racing 01/08 23:30 UTC = 20:30 Argentina).
+
+**Coerência interna confirmada nos dois** — overround de 4,8% e 5,3%, faixa
+normal. Se o parser estivesse lendo números errados, o overround sairia da
+faixa; ele não sai em nenhum dos 542.
+
+**A divergência de 20% no Racing NÃO é erro de extração** — é diferença real
+entre casas, com explicação conhecida: bplay é casa argentina e carrega
+dinheiro local pesado no Racing, encurtando o preço; a Betano Brasil tem
+menos exposição àquele time e oferece linha mais longa. Viés local é
+fenômeno documentado.
+
+**Consequência prática (importante para o teste 9.1):** a mesma seleção pode
+ter preço muito diferente entre casas, e isso é justamente onde mora o valor
+(line-shopping, regra 9). Mas **o teste no-vig exige os DOIS lados da MESMA
+casa** — nunca misturar Betano de um lado com outra casa do outro, porque as
+margens e os vieses são diferentes. Divergência entre casas é oportunidade a
+investigar, nunca insumo a combinar.
+
+**Limite honesto da validação:** conferir 2 jogos não prova os 362. O que
+está provado é: (a) o parser não inventa números — overround sempre plausível
+em todos os 542; (b) identidade (data/hora/times) bate com fonte externa;
+(c) a ordem de grandeza confere. Validação contínua entra no fluxo diário:
+amostrar 1-2 jogos por execução e registrar divergências.
 
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17

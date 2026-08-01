@@ -7,3 +7,5 @@ timestamp_utc,hora_utc,nimble,tavily,exa,nota
 2026-08-01T06:53:53+00:00,6,fora,fora,fora,checagem pre-execucao diaria 01/08
 2026-08-01T08:09:35+00:00,8,fora,fora,fora,execucao diaria 01/08 - todos fora (ToolSearch)
 2026-08-01T09:46:38+00:00,9,fora,fora,fora,janela 09h40 UTC (hora que funcionou em 31/07) - fora
+2026-08-01T14:05:07+00:00,14,fora,fora,fora,amostra 14h UTC (hora inedita) - fora
+2026-08-01T11:33:00+00:00,11,ok,ok,ok,"JANELA CONFIRMADA - extracao v23 bem-sucedida (542 eventos Betano, driver vx10)"
