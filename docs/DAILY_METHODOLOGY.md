@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v25 (01/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v26 (02/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -384,9 +384,13 @@ sistema opera em modo PE-first (v17-3) — que não depende de odds — e o PDF
 continua existindo como último recurso, não como rotina.
 
 (35) v22 (31/07, noite): **descobrir a JANELA certa em vez de chutar o
-horário.** Fechamento do dia: os conectores ficaram fora às 05h (execução
-diária), voltaram ~09h40 UTC por uma janela curta — a única em que a extração
-funcionou o dia inteiro — e caíram de novo, seguindo fora até 21h49 UTC.
+horário.** ⚠️ **HIPÓTESE REFUTADA em 02/08 — ver decisão (39).** Não existia
+janela a descobrir: os conectores nunca estiveram disponíveis em sessão
+agendada, em hora nenhuma. Este item fica registrado como está porque a
+maquinaria que ele criou (`connector_log.py`) foi justamente o que produziu
+a evidência da própria refutação. O que segue valendo dele é só a disciplina
+de registrar toda checagem; o que caiu é a leitura por hora e o
+`--recomendar`.
 
 O horário da trigger (05h BRT) nunca foi escolhido por evidência de quando as
 ferramentas funcionam; foi conveniência. Isso faz perder dias inteiros por
@@ -397,9 +401,9 @@ conectores costumam estar no ar. `--recomendar` só sugere mover a trigger com
 que a amostra é pequena e manda manter (mesma disciplina anti-overfitting do
 item 8.1: não mudar critério por ruído).
 
-**Toda execução diária DEVE registrar sua checagem de conectores.** É de graça
-e é o que transforma "os conectores oscilam" em "os conectores costumam estar
-no ar às HH:00" — que é o que permite automatizar de verdade.
+**Toda execução diária DEVE registrar sua checagem de conectores**, agora
+sempre com `contexto=trigger` ou `contexto=interativo` (v26). É de graça, e
+foi exatamente esse registro que permitiu enxergar a causa raiz.
 
 Bug pego na construção: registrar várias observações do dia de uma vez
 carimbava todas com a hora ATUAL (21h), fazendo o log afirmar que 21h tinha
@@ -528,6 +532,63 @@ em todos os 542; (b) identidade (data/hora/times) bate com fonte externa;
 (c) a ordem de grandeza confere. Validação contínua entra no fluxo diário:
 amostrar 1-2 jogos por execução e registrar divergências.
 
+(39) v26 (02/08): **CAUSA RAIZ da indisponibilidade dos conectores — não era
+oscilação, e a hora nunca foi a variável.**
+
+Por uma semana o sistema operou sob a hipótese de que Nimble/Tavily/Exa
+"oscilavam" e existia uma hora boa a descobrir. Isso gerou o
+`connector_log.py`, o corte `--janelas`, a recomendação de horário e uma
+cadeia de `send_later` reamostrando horas diferentes. Em 02/08, com 11
+checagens, o próprio log refutou a hipótese que o criou — bastou cruzar cada
+checagem com o **contexto de execução**:
+
+| Contexto | Com algum conector no ar |
+|---|---|
+| Dentro de disparo de trigger (sessão agendada) | **0/7** |
+| Turno interativo | **2/4** |
+
+**Teste decisivo, que controla a hora:** 31/07 às 09h40 em turno interativo =
+OK; 01/08 às 09h46 dentro de trigger = fora. Mesma hora do dia, resultado
+oposto. A hora não explica nada; o contexto explica tudo.
+
+**Mecanismo confirmado (lido, não inferido):** o `job_config` de toda trigger
+tem `session_context.allowed_tools` sem nenhuma entrada `mcp__*`. Sessões
+agendadas nascem sem ferramenta de conector. Não há janela a cronometrar —
+os conectores nunca estiveram disponíveis para execução agendada, em hora
+nenhuma. Tentar anexá-los via `create_trigger(connectors=[...])` retorna
+*"not available for this organization"*.
+
+**O que uma sessão agendada realmente alcança** (testado em 02/08):
+`WebSearch` funciona; `WebFetch` retorna 403 inclusive em `wikipedia.org`
+(o allowlist de rede segue valendo — só `pypi.org` e `registry.npmjs.org`);
+nenhum conector MCP. Ou seja: a trigger consegue fazer análise, pesquisa de
+elenco/tabela/H2H e acompanhamento de PE, mas **não consegue ler odds de
+casa** — e portanto não consegue produzir Aposta de Valor sozinha, porque o
+teste 9.1 exige os dois lados da mesma casa.
+
+**Consequência para o pedido do usuário (automação completa):** a extração
+automática (método v23) funciona, mas só é alcançável em turno interativo.
+A automação ponta-a-ponta depende de anexar os conectores às Routines pela
+UI do claude.ai — não há caminho por API a partir daqui. Enquanto isso não
+for feito, a execução agendada opera em modo PE-first declarado, e isso é
+uma limitação estrutural a declarar no relatório, nunca a mascarar.
+
+**Ações tomadas:** `contexto` virou coluna obrigatória do
+`connector_log.csv` (registrar sem ela é erro, não default silencioso);
+`--recomendar` foi removido (respondia à pergunta errada) e substituído por
+`--contexto`; teste de regressão 3g estendido; log vira sentinela — a
+primeira linha `trigger,ok` sinaliza que a automação foi destravada.
+Removida também a trigger "rede de segurança" criada horas antes, porque
+uma segunda janela não resolve um problema que não é de janela.
+
+**Lição de método (segunda vez na mesma semana — ver decisão 36):** construí
+maquinaria elaborada sobre uma hipótese que nunca testei contra a
+alternativa óbvia. Na decisão 36 o erro foi não ler a documentação dos
+parâmetros da própria ferramenta; aqui foi não cruzar o log com a variável
+de contexto — dado que já estava coletado desde o primeiro dia. **Antes de
+otimizar uma variável, verificar se ela é a variável.** Quando um número dá
+0/7, a explicação raramente é "azar de timing".
+
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17
 colunas — vírgula não escapada dentro do campo `casa` (ex.: `Superbet (odds
@@ -565,14 +626,28 @@ CONSOLIDADO; (B) PDF anexado; (C) resumo curto no chat (3-5 linhas).
 
 1. `git pull --rebase`; `python3 scripts/validate_system.py` (corrigir
    erros, anotar pendências).
-2. `ListConnectors` **E** `ToolSearch` para os três (Nimble, Exa, Tavily) —
-   o flag `enabledInChat` diverge da disponibilidade real, então o que vale é
-   a ferramenta CARREGAR. Reportar o status dos três, não só do Nimble.
-   **NÃO é um portão (v21):** se estiverem fora, seguir a execução e
-   re-checar ao menos 3× ao longo do trabalho (eles oscilam — em 31/07
-   caíram, voltaram às 09h40 e caíram de novo). Rodar
-   `python3 scripts/odds_sources.py --plano` para saber qual casa × ferramenta
-   tentar primeiro, e **registrar cada tentativa** com `--registrar`.
+2. **Checagem de conectores + contexto (v26).** `ToolSearch` para os três
+   (Nimble, Exa, Tavily) — o flag `enabledInChat` diverge da disponibilidade
+   real, então o que vale é a ferramenta CARREGAR. Registrar SEMPRE:
+   `python3 scripts/connector_log.py --registrar nimble=X tavily=Y exa=Z contexto=trigger nota="..."`
+   (usar `contexto=interativo` quando o usuário estiver presente).
+
+   **Saber em que contexto esta execução está rodando muda o que é possível
+   — ver decisão (39):**
+   - **Sessão agendada (trigger):** conectores MCP não existem (0/7
+     historicamente; `allowed_tools` da trigger não tem `mcp__*`). `WebFetch`
+     dá 403 em qualquer host. Só `WebSearch` funciona. **Não gastar a execução
+     re-checando** — uma checagem registrada basta. Ir direto para o modo
+     PE-first (item 9.3) e declarar no relatório que Aposta de Valor está
+     **estruturalmente indisponível** nesta execução, com o motivo real
+     (conector ausente por configuração da Routine), nunca como "dia fraco".
+   - **Turno interativo:** os conectores podem estar no ar. Se estiverem,
+     **prioridade máxima** é a varredura ampla do item 4b (método v23) —
+     é a única janela em que odds de casa são alcançáveis.
+
+   Se aparecer a primeira linha `trigger,ok` no log, a automação foi
+   destravada (usuário anexou os conectores às Routines): avisar e voltar a
+   tratar 4b como caminho normal da execução agendada.
 3. Resolver filas 14.4/14.5 + resultados de ontem + BUSCAR ODDS DE
    FECHAMENTO de ontem → preencher CLV no ledger (`clv()` do motor).
 4. **VARREDURA AMPLA — dois caminhos, nunca "dia fraco" sem ter feito os dois
@@ -582,9 +657,17 @@ CONSOLIDADO; (B) PDF anexado; (C) resumo curto no chat (3-5 linhas).
    temporada HOJE, ordenadas por prioridade (menos eficiente + precificada +
    com dado). Isto define O QUE procurar e roda sem rede. Nunca pular.
 
-   4b. **Com Nimble:** `nimble_extract` na home/hub de futebol da casa
-   (`betano.bet.br/sport/futebol/`) + `python3 scripts/scan_odds.py <dump>`
-   → catálogo real com odds.
+   4b. **Com Nimble (só alcançável em turno interativo — decisão 39):**
+   `nimble_extract` em `betano.bet.br/sport/futebol/jogos-de-hoje/` com
+   **`country="BR"`** (contorna o geobloqueio das casas `.bet.br`) e
+   **`driver="vx10"`** (o `vx6` padrão estoura timeout de 60s) — método v23.
+   Depois `python3 scripts/scan_odds.py <dump>` → catálogo real com odds.
+
+   **SEMPRE salvar o dump bruto em `data/dumps/YYYY-MM-DD-casa.json` e
+   commitar** (v26). Em 01/08 a extração de 542 eventos existiu só na resposta
+   da ferramenta e se perdeu no fim da sessão — no dia seguinte não havia como
+   re-testar o parser contra dado real, justamente quando o usuário pediu
+   testes repetidos. Extração que não foi persistida não pode ser reauditada.
 
    4c. **Sem Nimble (caminho v17, obrigatório):** `WebSearch` com
    `allowed_domains=["worldfootball.net","flashscore.com","soccerway.com",

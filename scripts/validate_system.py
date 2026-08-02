@@ -334,6 +334,27 @@ def main():
         # se ha dados, as horas precisam ser plausiveis
         for h in dados:
             assert 0 <= h <= 23, f"hora invalida no log: {h}"
+
+        # v26: 'contexto' e obrigatorio. Sem ele o log nao separa as duas
+        # populacoes (sessao agendada x turno interativo) e volta a sugerir
+        # que o problema e a HORA - o erro de diagnostico que custou uma
+        # semana. registrar() sem contexto valido tem que levantar erro.
+        assert "contexto" in inspect.signature(cl.registrar).parameters, (
+            "registrar() perdeu o parametro 'contexto' - o log voltaria a "
+            "misturar sessao agendada com turno interativo")
+        for ruim in (None, "", "qualquer"):
+            try:
+                cl.registrar("fora", "fora", "fora", contexto=ruim)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(
+                    f"registrar() aceitou contexto={ruim!r} - deveria recusar")
+        assert hasattr(cl, "por_contexto"), "connector_log sem por_contexto()"
+        for ctx in cl.por_contexto():
+            assert ctx in cl.CONTEXTOS, (
+                f"contexto '{ctx}' nao reconhecido em data/connector_log.csv - "
+                "linha registrada sem marcacao")
     except AssertionError as e:
         err(f"connector_log: REGRESSAO DETECTADA - {e}")
     except Exception as e:
@@ -354,20 +375,12 @@ def main():
                     f"- a cascata de extracao (v18) precisa citar os 3 conectores")
 
     # relatorio
-    # Banner de rota (v17-d): a trigger agendada ainda carrega um prompt
-    # EMBUTIDO e desatualizado (v13) porque o servidor Claude_Code_Remote esta
-    # fora ha dias e update_trigger nao pode ser aplicado. Este script roda no
-    # passo 1 de QUALQUER versao do fluxo - entao e o ponto mais confiavel para
-    # redirecionar a execucao para a metodologia real, versionada em git.
-    print("=" * 68)
-    print("ROTA OBRIGATORIA: a fonte da verdade da metodologia e")
-    print("  docs/DAILY_METHODOLOGY.md  (git, atualmente v25)")
-    print("Se o prompt desta execucao veio embutido na trigger agendada, ele")
-    print("esta DESATUALIZADO - leia o arquivo acima e siga o fluxo de la.")
-    print("Diferencas que o texto embutido antigo NAO tem: varredura por")
-    print("catalogo e nao por manchete (v17), PE-first sem odds (v17),")
-    print("nao competir com a casa no 1X2 (v17-b).")
-    print("=" * 68)
+    # O banner de rota (v17-d) foi REMOVIDO em 02/08: era uma muleta para o
+    # periodo em que o servidor Claude_Code_Remote estava fora e as triggers
+    # ainda carregavam o prompt v13 embutido. Em 02/08 o servidor voltou e os
+    # stubs foram aplicados nas duas triggers - elas agora fazem git pull e
+    # leem docs/DAILY_METHODOLOGY.md por conta propria. Manter o banner seria
+    # duplicar a instrucao em dois lugares que podem divergir.
     print("=== AUTO-DIAGNOSTICO DO SISTEMA ===")
     print(f"apostas_ledger: {len(apostas)} linhas | pe_ledger: {len(pes)} linhas")
     for w in WARNINGS:

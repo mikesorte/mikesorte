@@ -1,11 +1,12 @@
-timestamp_utc,hora_utc,nimble,tavily,exa,nota
-2026-07-31T08:10:00+00:00,8,fora,fora,fora,execucao diaria 05h BRT - todos fora
-2026-07-31T09:40:00+00:00,9,ok,ok,ok,"voltaram - Tavily leu worldfootball 141k chars, UNICA janela util do dia"
-2026-07-31T10:05:00+00:00,10,fora,fora,fora,cairam de novo
-2026-07-31T10:50:00+00:00,10,fora,fora,fora,seguem fora
-2026-07-31T21:49:00+00:00,21,fora,fora,fora,"fim do dia, seguem fora - jogos ja comecaram"
-2026-08-01T06:53:53+00:00,6,fora,fora,fora,checagem pre-execucao diaria 01/08
-2026-08-01T08:09:35+00:00,8,fora,fora,fora,execucao diaria 01/08 - todos fora (ToolSearch)
-2026-08-01T09:46:38+00:00,9,fora,fora,fora,janela 09h40 UTC (hora que funcionou em 31/07) - fora
-2026-08-01T14:05:07+00:00,14,fora,fora,fora,amostra 14h UTC (hora inedita) - fora
-2026-08-01T11:33:00+00:00,11,ok,ok,ok,"JANELA CONFIRMADA - extracao v23 bem-sucedida (542 eventos Betano, driver vx10)"
+timestamp_utc,hora_utc,nimble,tavily,exa,contexto,nota
+2026-07-31T08:10:00+00:00,8,fora,fora,fora,trigger,execucao diaria 05h BRT - todos fora
+2026-07-31T09:40:00+00:00,9,ok,ok,ok,interativo,"voltaram - Tavily leu worldfootball 141k chars, UNICA janela util do dia"
+2026-07-31T10:05:00+00:00,10,fora,fora,fora,interativo,cairam de novo
+2026-07-31T10:50:00+00:00,10,fora,fora,fora,interativo,seguem fora
+2026-07-31T21:49:00+00:00,21,fora,fora,fora,trigger,"fim do dia, seguem fora - jogos ja comecaram"
+2026-08-01T06:53:53+00:00,6,fora,fora,fora,trigger,checagem pre-execucao diaria 01/08
+2026-08-01T08:09:35+00:00,8,fora,fora,fora,trigger,execucao diaria 01/08 - todos fora (ToolSearch)
+2026-08-01T09:46:38+00:00,9,fora,fora,fora,trigger,janela 09h40 UTC (hora que funcionou em 31/07) - fora
+2026-08-01T14:05:07+00:00,14,fora,fora,fora,trigger,amostra 14h UTC (hora inedita) - fora
+2026-08-01T11:33:00+00:00,11,ok,ok,ok,interativo,"JANELA CONFIRMADA - extracao v23 bem-sucedida (542 eventos Betano, driver vx10)"
+2026-08-02T08:11:52+00:00,8,fora,fora,fora,trigger,execucao diaria 02/08 08h11 UTC - ToolSearch nao lista nenhum dos tres
