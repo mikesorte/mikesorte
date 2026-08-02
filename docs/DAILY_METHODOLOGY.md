@@ -589,6 +589,36 @@ de contexto — dado que já estava coletado desde o primeiro dia. **Antes de
 otimizar uma variável, verificar se ela é a variável.** Quando um número dá
 0/7, a explicação raramente é "azar de timing".
 
+(40) v26 (02/08): **"mais recente" não é "mais correto" — critério de
+desempate entre fontes divergentes.** Em 01/08 duas fontes deram tabelas
+diferentes para o KuPS (30 pts/15 j vs 36 pts/17 j). Desempatei por
+recência. Em 02/08 a tabela pós-jogo mostrou que a divergência de 2 jogos
+persiste entre as famílias de fonte — ou seja, **recência não resolveu
+nada**, só deu uma sensação de critério. As duas eram internamente
+coerentes (pontos = 3V+E nas duas), então coerência interna também não
+desempata sozinha.
+
+**Regra:** quando duas fontes divergem em dado de base que vai alimentar
+Wilson/Dixon-Coles, (a) buscar uma **terceira** fonte e usar a maioria;
+(b) não havendo terceira, usar a **mais conservadora** para a tese em
+questão (a que enfraquece o lado que eu quero apostar); (c) declarar a
+divergência no relatório sempre. **Nunca** desempatar por recência — fonte
+defasada e correta bate fonte fresca e errada.
+
+**Impacto do erro de 01/08:** usei "KuPS não perde 16/17 = 94,1%" quando a
+outra fonte implicava 14/15 = 93,3%. A conclusão do dia **não muda** — a
+reprovação do PE veio do lado Gnistan (Wilson inferior 31%), não do lado
+KuPS. Erro não-decisivo, registrado mesmo assim: erro que não mudou o
+resultado hoje muda em outro dia.
+
+**Limite honesto adicional descoberto no mesmo dia:** o `WebSearch` devolveu
+**placares conflitantes para a mesma partida** (2-1 numa busca, 1-0 em
+outra, com lista de gols que não fecha com nenhum dos dois). Para resolução
+de resultado, `WebSearch` sozinho **não é fonte confiável** — registrar
+apenas o que todas as versões concordam (aqui: "KuPS venceu") e deixar o
+resto declarado como lacuna. Nunca escolher um dos placares para "fechar" a
+linha do ledger.
+
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17
 colunas — vírgula não escapada dentro do campo `casa` (ex.: `Superbet (odds

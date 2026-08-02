@@ -374,6 +374,24 @@ def main():
                 err(f"docs/DAILY_METHODOLOGY.md: perdeu referencia a '{termo}' "
                     f"- a cascata de extracao (v18) precisa citar os 3 conectores")
 
+    # 3h) suite adversarial da extracao (v26). Roda em TODA execucao: e o
+    # unico teste da extracao que nao depende de conector no ar, entao e a
+    # unica verificacao disponivel numa sessao agendada (decisao 39).
+    # Silenciosa quando passa; so fala se algo quebrou.
+    try:
+        import subprocess
+        r = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                          "test_extraction.py")],
+            capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            ruins = [l.strip() for l in r.stdout.splitlines()
+                     if l.strip().startswith(("FALHA", "- ", "ERRO"))]
+            err("test_extraction: SUITE ADVERSARIAL FALHOU - "
+                + "; ".join(ruins[:6] or ["ver saida completa"]))
+    except Exception as e:
+        err(f"test_extraction: nao foi possivel rodar a suite - {e}")
+
     # relatorio
     # O banner de rota (v17-d) foi REMOVIDO em 02/08: era uma muleta para o
     # periodo em que o servidor Claude_Code_Remote estava fora e as triggers

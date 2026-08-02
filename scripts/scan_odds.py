@@ -200,7 +200,11 @@ def filtrar_elegiveis(eventos, data_brt=None, agora_ms=None):
             if dt.date().isoformat() != hoje:
                 motivos["outro_dia"] += 1
                 continue
-            if int(ts) < corte:
+            # <= e nao < : jogo comecando EXATAMENTE agora tambem esta fora.
+            # Nao da para entrar pre-jogo no instante do apito, e a regra 0
+            # ("nunca analisar jogo encerrado") vale desde o inicio da partida.
+            # Bug encontrado pela suite adversarial (test_extraction.py, v26).
+            if int(ts) <= corte:
                 motivos["ja_iniciado"] += 1
                 continue
         elegiveis.append(ev)
