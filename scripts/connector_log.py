@@ -55,11 +55,18 @@ from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG = os.path.join(ROOT, "data/connector_log.csv")
-COLUNAS = ["timestamp_utc", "hora_utc", "nimble", "tavily", "exa", "contexto", "nota"]
+COLUNAS = ["timestamp_utc", "hora_utc", "nimble", "tavily", "exa", "contexto",
+           "dispositivo", "nota"]
 ESTADOS = ("ok", "fora")
 # 'trigger'   = checagem feita dentro de um disparo agendado (sessao sem mcp__*)
 # 'interativo' = checagem feita num turno com o usuario presente
 CONTEXTOS = ("trigger", "interativo")
+# De onde o usuario respondeu. Pergunta aberta em 02/08: os conectores sao
+# concedidos por CONTA (e ai tanto faz o aparelho) ou dependem do cliente que
+# abriu o turno? As 2 janelas que funcionaram vieram de dispositivo nao
+# registrado, entao nao da para responder com o dado atual - vira experimento,
+# nao chute. 'na' para checagem em trigger (nao ha usuario/aparelho envolvido).
+DISPOSITIVOS = ("pc", "mobile", "desconhecido", "na")
 
 
 def _garantir():
@@ -69,7 +76,8 @@ def _garantir():
             csv.writer(f).writerow(COLUNAS)
 
 
-def registrar(nimble, tavily, exa, nota="", quando=None, contexto=None):
+def registrar(nimble, tavily, exa, nota="", quando=None, contexto=None,
+              dispositivo=None):
     """quando: ISO-8601 UTC para observacao RETROATIVA (ex.: preencher o que
     foi observado mais cedo no dia). Sem isso, usa a hora atual.
 
@@ -90,6 +98,11 @@ def registrar(nimble, tavily, exa, nota="", quando=None, contexto=None):
         raise ValueError(
             f"contexto={contexto!r} invalido; use um de {CONTEXTOS}. "
             "Sem contexto o log nao distingue as duas populacoes e vira ruido.")
+    if dispositivo is None:
+        dispositivo = "na" if contexto == "trigger" else "desconhecido"
+    if dispositivo not in DISPOSITIVOS:
+        raise ValueError(
+            f"dispositivo={dispositivo!r} invalido; use um de {DISPOSITIVOS}")
     _garantir()
     if quando:
         ts = datetime.fromisoformat(quando)
@@ -99,7 +112,8 @@ def registrar(nimble, tavily, exa, nota="", quando=None, contexto=None):
         ts = datetime.now(timezone.utc)
     with open(LOG, "a", newline="", encoding="utf-8") as f:
         csv.writer(f).writerow([ts.isoformat(timespec="seconds"),
-                                ts.hour, nimble, tavily, exa, contexto, nota])
+                                ts.hour, nimble, tavily, exa, contexto,
+                                dispositivo, nota])
 
 
 def ler():
@@ -147,7 +161,8 @@ def main():
         kv = dict(p.split("=", 1) for p in args.registrar)
         registrar(kv.get("nimble", "fora"), kv.get("tavily", "fora"),
                   kv.get("exa", "fora"), kv.get("nota", ""),
-                  kv.get("quando"), kv.get("contexto"))
+                  kv.get("quando"), kv.get("contexto"),
+                  kv.get("dispositivo"))
         print("registrado")
         return 0
 
@@ -170,6 +185,23 @@ def main():
         print("(fonte: data/connector_log.csv - esta e a variavel que explica)\n")
         for ctx, (ok, tot) in dados.items():
             print(f"  {ctx:<12} {ok}/{tot} com algum conector no ar")
+        # corte por dispositivo - so faz sentido dentro dos turnos interativos
+        inter = [r for r in ler() if r.get("contexto") == "interativo"]
+        if inter:
+            print("\n--- dentro dos turnos interativos, por dispositivo ---")
+            agreg = defaultdict(lambda: [0, 0])
+            for r in inter:
+                d = (r.get("dispositivo") or "desconhecido").strip() or "desconhecido"
+                agreg[d][1] += 1
+                if any(r.get(c) == "ok" for c in ("nimble", "tavily", "exa")):
+                    agreg[d][0] += 1
+            for d, (ok, tot) in sorted(agreg.items()):
+                print(f"  {d:<13} {ok}/{tot}")
+            if set(agreg) <= {"desconhecido"}:
+                print("  (nenhum dispositivo registrado ainda - a pergunta")
+                print("   'PC ou celular funciona?' segue SEM RESPOSTA. Registrar")
+                print("   dispositivo=pc|mobile nas proximas execucoes resolve.)")
+
         trig = dados.get("trigger", (0, 0))
         if trig[1] and trig[0] == 0:
             print(f"\nSessoes agendadas: {trig[0]}/{trig[1]}. Consistente com o")
