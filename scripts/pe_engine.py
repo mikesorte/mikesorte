@@ -56,13 +56,37 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from betting_model import (poisson_dixon_coles, implied_lambdas, devig_power,
+from betting_model import (poisson_dixon_coles, gols_dixon_coles,
+                           implied_lambdas, devig_power, devig_shin,
                            InversaoFalhou)
 import scan_odds
 
-# Cenarios de robustez. rho varia na faixa da literatura; o de-vig varia entre
-# POWER (padrao) e proporcional simples, que sao os dois extremos praticos.
-CENARIOS_RHO = (-0.18, -0.11, -0.04)
+# Cenarios de robustez: (rho, forma_dispersao). rho varia na faixa da
+# literatura; 'forma' controla a superdispersao dos gols (None = Poisson puro).
+#
+# A dispersao entrou em v28 depois que o estudo de ma-especificacao
+# (scripts/backtest.py) mostrou vies SISTEMATICO com Poisson puro: Over 2.5
+# +17pp, BTTS +20pp, Under na direcao oposta. Gols reais tem variancia maior
+# que a media, e Poisson subestima P(0 gols) - o que infla exatamente "ambas
+# marcam" e "over". Nao era ruido corrigivel com mais amostra; era o modelo.
+#
+# Incluir cenarios superdispersos faz o PIOR CENARIO (que e o que o motor
+# reporta) ja absorver esse erro, em vez de depender de um fator de correcao
+# chumbado que precisaria ser recalibrado a cada mudanca.
+CENARIOS = (
+    (-0.18, None),   # Poisson puro, rho forte
+    (-0.11, None),   # Poisson puro, rho central
+    (-0.04, None),   # Poisson puro, rho fraco
+    (-0.11, 8.0),    # superdispersao leve
+    (-0.11, 5.0),    # superdispersao moderada
+    (-0.11, 3.5),    # superdispersao forte
+    # Cenario 'jogo com choque' (v28): expulsao/lesao muda o jogo DEPOIS que a
+    # odd foi fixada. Nenhuma odd pre-jogo contem essa informacao, e o efeito
+    # e dispersao efetiva ainda maior. Nao e chute para ajustar o numero - e
+    # um mecanismo real que o estudo mostrou nao estar coberto pela faixa
+    # anterior (o valor verdadeiro de Over ficava ABAIXO de todos os cenarios).
+    (-0.11, 2.5),
+)
 
 # Pisos por faixa, aplicados ao PIOR cenario. Calibrados para serem
 # DEFENSAVEIS, nao generosos: a faixa Alta precisa ser algo que, errando,
@@ -98,9 +122,12 @@ def devig_proporcional(odds):
     return [i / s for i in imps]
 
 
-def mercados_derivados(lh, la, rho):
-    """Todos os mercados que saem dos lambdas, com nome legivel."""
-    d = poisson_dixon_coles(lh, la, rho=rho)
+def mercados_derivados(lh, la, rho, forma=None):
+    """Todos os mercados que saem dos lambdas, com nome legivel.
+
+    'forma' None = Poisson puro; finito = superdisperso (ver v28).
+    """
+    d = gols_dixon_coles(lh, la, rho=rho, forma=forma)
     return {
         "Dupla chance 1X": d["p_home"] + d["p_draw"],
         "Dupla chance X2": d["p_draw"] + d["p_away"],
@@ -137,25 +164,31 @@ def avalia_evento(ev, so_probabilidades=False):
     except Exception as e:
         return [], f"de-vig falhou ({type(e).__name__})"
 
-    # colecao de cenarios: (rho, probabilidades justas)
-    variantes = []
-    for rho in CENARIOS_RHO:
-        variantes.append((rho, justo_power))
-    try:
-        variantes.append((-0.11, devig_proporcional(odds)))
-    except Exception:
-        pass
+    # cenarios: (rho, forma, probabilidades justas). Inclui os dois metodos
+    # de de-vig como fonte extra de variacao.
+    variantes = [(rho, forma, justo_power) for rho, forma in CENARIOS]
+    # de-vigs alternativos como fonte extra de variacao. Shin entrou em v28
+    # por causa do vies favorito-azarao (ver betting_model.devig_shin).
+    for alt in (devig_proporcional, devig_shin):
+        try:
+            pa = alt(odds)
+        except Exception:
+            continue
+        variantes += [(-0.11, None, pa), (-0.11, 5.0, pa), (-0.11, 3.5, pa)]
 
     por_mercado = {}
     lambdas_ref = None
-    for rho, justo in variantes:
+    for rho, forma, justo in variantes:
         try:
+            # a INVERSAO usa sempre Poisson+rho: e o modelo com que a casa
+            # precifica o 1X2. A dispersao entra so na PROJECAO dos mercados
+            # derivados, que e onde o erro de Poisson aparece.
             lh, la = implied_lambdas(*justo, rho=rho)
         except InversaoFalhou:
             return [], "inversao falhou (dado implausivel)"
         if lambdas_ref is None:
             lambdas_ref = (lh, la)
-        for nome, p in mercados_derivados(lh, la, rho).items():
+        for nome, p in mercados_derivados(lh, la, rho, forma).items():
             por_mercado.setdefault(nome, []).append(p)
 
     if so_probabilidades:

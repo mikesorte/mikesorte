@@ -121,6 +121,32 @@ def main():
         line = f"{faixa}: {occ}/{res} ocorreram" if res else f"{faixa}: 0 resolvidos"
         print(f"{line} (arquivado/retirado/pendente: {other}, total emitido: {len(rows)})")
 
+    # CALIBRACAO POR MERCADO (v28) - o corte que a faixa esconde.
+    # O estudo de ma-especificacao mostrou que a calibracao AGREGADA por faixa
+    # pode parecer otima enquanto os mercados erram muito em direcoes OPOSTAS
+    # e se cancelam: no mundo controle a faixa dava +1.8pp de vies enquanto
+    # Over 2.5 estava +7.5pp e Under 3.5 estava -10.9pp. Faixa calibrada NAO
+    # e evidencia de que o sistema sabe o que esta fazendo.
+    print("\n--- Calibracao por FAMILIA DE MERCADO (regra v28) ---")
+    familias = {}
+    for r in pes:
+        if r.get("ocorreu") not in ("sim", "nao"):
+            continue
+        fam = (r.get("mercado") or "?").strip()
+        familias.setdefault(fam, []).append(r.get("ocorreu") == "sim")
+    if not familias:
+        print("  Nenhum PE resolvido ainda - nada a calibrar por mercado.")
+        print("  Este corte so passa a valer quando houver >=10 por familia.")
+    else:
+        for fam, occs in sorted(familias.items(), key=lambda t: -len(t[1])):
+            qtd = len(occs)
+            taxa = sum(occs) / qtd
+            aviso = "" if qtd >= 10 else "  (amostra < 10 - so contexto)"
+            print(f"  {fam:<28} {sum(occs)}/{qtd} = {taxa:.0%}{aviso}")
+        print("  ALERTA se, com N>=10 numa familia, o desvio entre a confianca")
+        print("  afirmada e a taxa observada passar de 5pp - mesmo que a faixa")
+        print("  agregada esteja calibrada.")
+
     # guarda contra shadowing acidental de 'n' por blocos inseridos acima
     # (bug real introduzido e pego em 31/07: um 'for fam, n in ...' sobrescreveu
     # o N do ledger e o aviso final passou a imprimir N=0)

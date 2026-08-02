@@ -75,6 +75,82 @@ def poisson_dixon_coles(lambda_home, lambda_away, rho=-0.11, max_goals=10):
     return out
 
 
+def _negbin(mu, k, forma):
+    """P(K=k) numa binomial negativa com media 'mu' e parametro de forma
+    'forma' (mistura Poisson-gama). forma -> infinito recupera Poisson.
+
+    Variancia = mu + mu^2/forma, ou seja SEMPRE maior que a media.
+    """
+    p = forma / (forma + mu)
+    # lgamma evita estouro em k grande
+    log_p = (math.lgamma(k + forma) - math.lgamma(k + 1) - math.lgamma(forma)
+             + forma * math.log(p) + k * math.log(1 - p))
+    return math.exp(log_p)
+
+
+def gols_dixon_coles(lambda_home, lambda_away, rho=-0.11, max_goals=10,
+                     forma=None):
+    """Igual a poisson_dixon_coles, mas com marginais SUPERDISPERSAS quando
+    'forma' e finito.
+
+    POR QUE (v28): o estudo de ma-especificacao mostrou que assumir Poisson
+    puro produz vies SISTEMATICO e direcional nos mercados de gols - Over 2.5
+    +17pp, BTTS +20pp, com os Under indo para o outro lado. Nao e ruido: gols
+    de futebol tem variancia maior que a media, o que concentra mais massa no
+    zero do que Poisson preve. Subestimar P(0 gols) infla exatamente "ambas
+    marcam" e "over".
+
+    'forma' baixo = mais superdisperso. A literatura de futebol sugere
+    superdispersao leve; usamos a faixa como CENARIO de robustez, nao como
+    valor unico chutado.
+    """
+    if forma is None:
+        return poisson_dixon_coles(lambda_home, lambda_away, rho, max_goals)
+
+    def tau(x, y):
+        if x == 0 and y == 0:
+            return 1 - lambda_home * lambda_away * rho
+        if x == 0 and y == 1:
+            return 1 + lambda_home * rho
+        if x == 1 and y == 0:
+            return 1 + lambda_away * rho
+        if x == 1 and y == 1:
+            return 1 - rho
+        return 1.0
+
+    grid, total = {}, 0.0
+    for h in range(max_goals + 1):
+        ph = _negbin(lambda_home, h, forma)
+        for a in range(max_goals + 1):
+            p = ph * _negbin(lambda_away, a, forma) * tau(h, a)
+            grid[(h, a)] = p
+            total += p
+    for k in grid:
+        grid[k] /= total
+
+    out = {"p_home": 0.0, "p_draw": 0.0, "p_away": 0.0, "btts": 0.0}
+    overs = {1.5: 0.0, 2.5: 0.0, 3.5: 0.0}
+    margins = {}
+    for (h, a), p in grid.items():
+        if h > a:
+            out["p_home"] += p
+        elif h == a:
+            out["p_draw"] += p
+        else:
+            out["p_away"] += p
+        if h >= 1 and a >= 1:
+            out["btts"] += p
+        for line in overs:
+            if h + a > line:
+                overs[line] += p
+        margins[h - a] = margins.get(h - a, 0.0) + p
+    for line, p in overs.items():
+        out[f"over_{line}"] = p
+        out[f"under_{line}"] = 1 - p
+    out["margins"] = margins
+    return out
+
+
 def win_by_margin(model_out, min_margin):
     """P(mandante vence por >= min_margin gols de diferenca), a partir do
     dict retornado por poisson_dixon_coles(). Uso tipico: mata-mata em que
@@ -242,6 +318,61 @@ def implied_lambdas(p_home, p_draw, p_away, rho=-0.11,
             raise InversaoFalhou(
                 f"round-trip falhou em {nome}: {obtido:.6f} != {esperado:.6f}")
     return lh, la
+
+
+def devig_shin(odds, tol=1e-12, max_iter=300):
+    """De-vig pelo metodo de SHIN.
+
+    POR QUE (v28): POWER e proporcional assumem que a casa distribui a margem
+    de forma homogenea. Ela nao distribui - o azarao carrega margem
+    proporcionalmente maior (vies favorito-azarao), fenomeno documentado e
+    reproduzido no estudo de ma-especificacao. Ignorar isso enviesa as
+    probabilidades justas de forma SISTEMATICA, e todo mercado derivado herda
+    o erro.
+
+    Shin modela a margem como consequencia de negociantes informados: acha o
+    parametro z (fracao de dinheiro informado) tal que as probabilidades
+    resultantes somem 1. Por construcao ele tira MAIS margem dos azaroes que
+    dos favoritos, que e exatamente a assimetria observada.
+
+    Nao substitui o POWER - entra como CENARIO adicional de robustez, para o
+    motor nao depender de nenhum metodo unico de de-vig.
+    """
+    imps = [1.0 / o for o in odds]
+    S = sum(imps)
+    if S <= 1.0:
+        raise ValueError(
+            f"soma das probabilidades implicitas = {S:.4f} <= 1 - odds sem "
+            "margem sao dado de agregador invalido (regra v8), descartar")
+
+    def p_de_z(z):
+        if z >= 1.0:
+            raise ValueError("z fora de faixa")
+        out = []
+        for pi in imps:
+            raiz = math.sqrt(z * z + 4 * (1 - z) * pi * pi / S)
+            out.append((raiz - z) / (2 * (1 - z)))
+        return out
+
+    def f(z):
+        return sum(p_de_z(z)) - 1.0
+
+    lo, hi = 0.0, 0.99
+    # f(0) = S - 1 > 0 ; f cresce com z decrescente -> raiz no meio
+    if f(lo) <= 0:
+        return [pi / S for pi in imps]      # sem margem a corrigir
+    if f(hi) > 0:
+        raise ValueError("Shin nao convergiu - odds anomalas, descartar")
+    for _ in range(max_iter):
+        mid = (lo + hi) / 2
+        v = f(mid)
+        if abs(v) < tol:
+            break
+        if v > 0:
+            lo = mid
+        else:
+            hi = mid
+    return p_de_z((lo + hi) / 2)
 
 
 # ------------------------------------------------------------------ metricas

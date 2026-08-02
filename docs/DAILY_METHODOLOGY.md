@@ -619,6 +619,69 @@ apenas o que todas as versões concordam (aqui: "KuPS venceu") e deixar o
 resto declarado como lacuna. Nunca escolher um dos placares para "fechar" a
 linha do ledger.
 
+(41) v27-v28 (02/08): **o gargalo era vazão, não rigor — e a correção
+revelou um viés sistemático no modelo de gols.**
+
+**Diagnóstico.** 362 jogos elegíveis e zero palpites em 01/08 não foi
+critério apertado: 361 jogos nunca foram *avaliados*. O funil exigia
+pesquisa manual por jogo, o que limita a 2-4 por dia.
+
+**Virada (v27) — `implied_lambdas()`.** O insumo do PE passa a ser a própria
+odd. Inverte-se o Dixon-Coles: `1X2 de-vigado → λ implícitos → qualquer
+mercado derivado`, sem pesquisar nada sobre os times. Avalia centenas de
+jogos em segundos.
+
+Isto **respeita** a decisão v17-b em vez de contrariá-la: em vez de disputar
+o 1X2 da casa com λ chutado, aceita o 1X2 como entrada (é o melhor estimador
+público) e trabalha nos mercados secundários, menos eficientes (regra 8).
+
+**Três defeitos mortos antes do primeiro uso:** odds corrompidas (overround
+186%) viravam PE faixa Alta porque o de-vig POWER normaliza qualquer coisa;
+dupla chance inflava a contagem (é aritmética do 1X2, não usa o modelo);
+"Over 1.5 a 72%" não é palpite se 72% é a taxa-base — daí o filtro de
+distintividade contra a mediana do próprio catálogo do dia.
+
+**Validação (v28) — `scripts/backtest.py`, estudo de má-especificação.** Não
+é backtest com dado real (não existe par odd-resultado em escala; o catálogo
+de 01/08 não foi persistido). É um mundo simulado **deliberadamente
+diferente** do modelo: gols superdispersos, rho variável, 8% de jogos com
+choque pós-apito, e viés favorito-azarão na precificação.
+
+Resultado inicial: **superconfiança sistemática.** Faixa Alta afirmava 84,8%
+e entregava 72,1% (+12,7pp); BTTS +20,1pp; Over 2.5 +17,3pp; os Under na
+direção oposta. Assinatura inequívoca de superdispersão — Poisson subestima
+P(0 gols), o que infla exatamente "ambas marcam" e "over".
+
+**Correções aplicadas, ambas justificadas por mecanismo (não por ajuste de
+constante):**
+1. `gols_dixon_coles(..., forma=)` — marginais binomial-negativa
+   (superdispersas) como cenários de robustez. Gols de futebol têm variância
+   maior que a média; assumir Poisson puro é erro de modelo, não ruído.
+2. `devig_shin()` — de-vig de Shin, que retira **mais margem do azarão** que
+   do favorito, corrigindo o viés favorito-azarão que POWER e proporcional
+   ignoram.
+
+**Efeito medido:** erro médio absoluto 14,8% → 9,0%; Brier contra a verdade
+0,0251 → 0,0094 (**−62%**); ambas as faixas passaram a ficar dentro do
+intervalo de Wilson (deixaram de "afirmar mais do que entregam").
+
+**ACHADO QUE VALE MAIS QUE A CORREÇÃO — calibração agregada engana.** Mesmo
+no mundo *controle* (quase igual ao modelo), a calibração por faixa parecia
+ótima (+1,8pp) enquanto os mercados individuais erravam muito e em direções
+**opostas**: Over 2.5 +7,5pp, Under 3.5 −10,9pp. Os erros se cancelavam no
+agregado. **Regra nova: calibração por faixa NUNCA é evidência suficiente —
+o `pe_ledger` passa a exigir acompanhamento por FAMÍLIA DE MERCADO, e um
+viés por mercado acima de 5pp é alerta mesmo com a faixa calibrada.**
+
+**Onde eu parei de propósito.** O viés residual por mercado (Over ~+10pp,
+Under ~−8pp) poderia ser zerado empurrando mais os parâmetros de dispersão —
+mas os parâmetros do mundo simulado são **invenção minha**, não medição.
+Zerar o erro contra a própria simulação seria overfitting a uma fantasia.
+O que fica: as correções com justificativa física, e a medição do resto
+adiada para dado real. **Isto exige catálogo real persistido + resultados
+observados — é a próxima evolução, e ela depende de dado, não de mais
+código.**
+
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17
 colunas — vírgula não escapada dentro do campo `casa` (ex.: `Superbet (odds
