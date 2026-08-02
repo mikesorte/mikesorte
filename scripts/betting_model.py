@@ -116,6 +116,134 @@ def devig_power(odds, tol=1e-10, max_iter=200):
     return [i ** k for i in imps]
 
 
+# -------------------------------------------------- inversao 1X2 -> lambdas
+class InversaoFalhou(Exception):
+    """A inversao nao convergiu ou produziu lambdas implausiveis. Chamador
+    DEVE descartar o evento, nunca cair para um valor default."""
+
+
+def implied_lambdas(p_home, p_draw, p_away, rho=-0.11,
+                    tol=1e-9, max_iter=200):
+    """INVERSA do Dixon-Coles: dadas as probabilidades JUSTAS de 1X2 (ja
+    de-vigadas), acha (lambda_mandante, lambda_visitante) que as reproduzem.
+
+    POR QUE ISTO EXISTE (v27)
+    -------------------------
+    Ate aqui o sistema so sabia ir de lambda -> probabilidade, e o lambda
+    vinha de proxy chutado a partir de tabela/forma. Isso levou a competir
+    com a casa no 1X2 usando informacao pior que a dela - erro documentado
+    na decisao v17-b, repetido em 4 jogos seguidos.
+
+    A inversao vira o problema do avesso: o 1X2 da casa e o MELHOR estimador
+    publico disponivel do jogo (e o produto mais eficiente dela). Em vez de
+    disputar esse numero, eu o ACEITO como entrada e extraio dele os lambdas
+    implicitos. Com os lambdas, calculo qualquer mercado derivado (over/under,
+    BTTS, dupla chance, placar) SEM precisar pesquisar nada sobre os times.
+
+    Isso e o que permite avaliar centenas de jogos por dia em vez de 2: o
+    insumo passa a ser a propria odd, que ja vem no catalogo.
+
+    IMPORTANTE - o que isto NAO e: nao e uma fonte de edge sobre o 1X2. As
+    probabilidades derivadas herdam exatamente a informacao da casa, mais o
+    erro do modelo de gols. Servem para (a) enunciar probabilidade em PE e
+    (b) comparar contra os mercados SECUNDARIOS da casa, que sao menos
+    eficientes (regra 8). Nunca para reapostar no proprio 1X2 de origem.
+
+    Levanta InversaoFalhou se nao convergir ou se os lambdas sairem fora de
+    faixa plausivel de futebol - dado ruim tem que morrer aqui, nao virar
+    palpite.
+    """
+    alvo = (p_home, p_draw, p_away)
+    if any(p <= 0 for p in alvo):
+        raise InversaoFalhou(f"probabilidade nao-positiva em {alvo}")
+    if abs(sum(alvo) - 1.0) > 1e-6:
+        raise InversaoFalhou(f"probabilidades nao somam 1: {sum(alvo):.6f}")
+
+    # Parametrizacao: total = lh + la (ritmo do jogo), diff = lh - la (forca
+    # relativa). Sao quase ortogonais em relacao a (p_draw) e (p_home-p_away),
+    # o que faz a busca coordenada convergir rapido e de forma estavel.
+    def probs(total, diff):
+        lh = (total + diff) / 2.0
+        la = (total - diff) / 2.0
+        if lh <= 0.01 or la <= 0.01:
+            raise InversaoFalhou(f"lambda nao-positivo (lh={lh:.3f}, la={la:.3f})")
+        o = poisson_dixon_coles(lh, la, rho=rho)
+        return o["p_home"], o["p_draw"], o["p_away"], lh, la
+
+    def residuos(total, diff):
+        ph, pd, pa, _, _ = probs(total, diff)
+        return ((ph - pa) - (p_home - p_away), pd - p_draw)
+
+    def clampa(total, diff):
+        # Os dois parametros sao ACOPLADOS: lh=(total+diff)/2, la=(total-diff)/2,
+        # entao |diff| tem que caber dentro de total ou um lambda fica negativo.
+        # Clampar cada um isoladamente nao basta - foi o que quebrou o caso
+        # (2.4, 0.7) na primeira versao.
+        total = min(max(total, 0.30), 12.0)
+        limite = total - 0.20            # garante ambos os lambdas >= 0.10
+        return total, min(max(diff, -limite), limite)
+
+    total, diff = 2.6, 0.0          # chute inicial: jogo medio, times iguais
+    convergiu = False
+    for _ in range(max_iter):
+        r1, r2 = residuos(total, diff)
+        if abs(r1) < tol and abs(r2) < tol:
+            convergiu = True
+            break
+        # Jacobiano numerico COMPLETO. A primeira versao usava so as diagonais
+        # (assumindo que 'diff' so mexe no favoritismo e 'total' so no empate);
+        # a aproximacao vale perto do centro mas quebra em jogos muito
+        # desequilibrados - (3.1, 0.5) e (0.8, 2.9) nao convergiam.
+        h = 1e-5
+        r1t, r2t = residuos(*clampa(total + h, diff))
+        r1d, r2d = residuos(*clampa(total, diff + h))
+        j11, j21 = (r1t - r1) / h, (r2t - r2) / h     # d/d total
+        j12, j22 = (r1d - r1) / h, (r2d - r2) / h     # d/d diff
+        det = j11 * j22 - j12 * j21
+        if abs(det) < 1e-14:
+            raise InversaoFalhou("jacobiano singular - sem solucao local")
+        # regra de Cramer para J * [dt, dd] = -[r1, r2]
+        dt = -(j22 * r1 - j12 * r2) / det
+        dd = -(j11 * r2 - j21 * r1) / det
+        # busca de linha: aceita o passo so se o residuo diminuir de fato.
+        # Newton puro diverge nos casos extremos; com recuo ele sempre progride.
+        norma = abs(r1) + abs(r2)
+        passo = 1.0
+        for _ in range(30):
+            nt, nd = clampa(total + passo * dt, diff + passo * dd)
+            try:
+                n1, n2 = residuos(nt, nd)
+            except InversaoFalhou:
+                passo *= 0.5
+                continue
+            if abs(n1) + abs(n2) < norma:
+                total, diff = nt, nd
+                break
+            passo *= 0.5
+        else:
+            raise InversaoFalhou("busca de linha nao encontrou passo que melhore")
+    if not convergiu:
+        raise InversaoFalhou("nao convergiu em max_iter")
+
+    lh, la = (total + diff) / 2.0, (total - diff) / 2.0
+    # faixa de sanidade: futebol de verdade vive entre ~0.15 e ~5 gols
+    # esperados por lado. Fora disso e odd corrompida ou mercado exotico.
+    if not (0.10 <= lh <= 6.0 and 0.10 <= la <= 6.0):
+        raise InversaoFalhou(f"lambdas implausiveis: lh={lh:.3f}, la={la:.3f}")
+
+    # verificacao final de ida-e-volta: recalcular e conferir contra o alvo.
+    # Se a reconstrucao nao bate, a solucao nao vale - nao entregar numero
+    # que nao reproduz a propria entrada.
+    conf = poisson_dixon_coles(lh, la, rho=rho)
+    for nome, obtido, esperado in (("p_home", conf["p_home"], p_home),
+                                   ("p_draw", conf["p_draw"], p_draw),
+                                   ("p_away", conf["p_away"], p_away)):
+        if abs(obtido - esperado) > 1e-4:
+            raise InversaoFalhou(
+                f"round-trip falhou em {nome}: {obtido:.6f} != {esperado:.6f}")
+    return lh, la
+
+
 # ------------------------------------------------------------------ metricas
 def wilson_ci(k, n, z=1.96):
     """Retorna (taxa_observada, limite_inferior, limite_superior)."""

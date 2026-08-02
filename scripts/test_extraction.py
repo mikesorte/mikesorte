@@ -235,11 +235,89 @@ def teste_sem_start_time():
           len(elig) == 1, f"elig={len(elig)} motivos={mot}")
 
 
+def teste_inversao():
+    """A inversao 1X2 -> lambdas e o coracao do v27. O teste que importa e o
+    ida-e-volta: gerar probabilidades a partir de lambdas conhecidos e exigir
+    que a inversao os recupere. Se isso falha, TODO palpite derivado e lixo."""
+    print("\n[8] inversao Dixon-Coles (ida-e-volta)")
+    from betting_model import implied_lambdas, InversaoFalhou
+    from betting_model import poisson_dixon_coles as dc
+    casos = [(1.6, 1.1), (2.4, 0.7), (3.1, 0.5), (0.8, 2.9), (0.4, 0.6),
+             (2.0, 2.0), (4.5, 0.4), (0.2, 0.2)]
+    pior = 0.0
+    for lh, la in casos:
+        o = dc(lh, la)
+        try:
+            rh, ra = implied_lambdas(o["p_home"], o["p_draw"], o["p_away"])
+        except InversaoFalhou as e:
+            checa(f"inverte ({lh}, {la})", False, str(e))
+            continue
+        pior = max(pior, abs(rh - lh), abs(ra - la))
+    checa(f"recupera lambdas em {len(casos)} perfis (pior erro {pior:.1e})",
+          pior < 1e-3, f"erro {pior}")
+
+    # entradas invalidas tem que MORRER aqui, nunca virar lambda default
+    for ruim in [(0.0, 0.5, 0.5), (0.5, 0.5, 0.5), (-0.1, 0.6, 0.5)]:
+        try:
+            implied_lambdas(*ruim)
+        except InversaoFalhou:
+            checa(f"recusa entrada invalida {ruim}", True)
+        else:
+            checa(f"recusa entrada invalida {ruim}", False,
+                  "aceitou probabilidade que nao soma 1 ou nao-positiva")
+
+
+def teste_pe_engine():
+    """Falhas reais encontradas na PRIMEIRA execucao do motor, antes de
+    qualquer uso: (a) odds corrompidas [1.05,1.05,1.05] viravam PE faixa Alta
+    porque o de-vig POWER normaliza qualquer coisa; (b) dupla chance inflava
+    a contagem com trivialidade aritmetica."""
+    print("\n[9] motor de PE")
+    import pe_engine as pe
+
+    cands, motivo = pe.avalia_evento({"odds": [1.05, 1.05, 1.05]})
+    checa("odds corrompidas sao descartadas pelo overround",
+          motivo is not None and "overround" in motivo, f"motivo={motivo}")
+
+    cands, motivo = pe.avalia_evento({"odds": [2.0, 3.0]})
+    checa("1X2 incompleto descartado", motivo == "sem 1X2 completo", f"{motivo}")
+
+    cands, motivo = pe.avalia_evento({"odds": [0.5, 3.0, 4.0]})
+    checa("odd <= 1.0 descartada", motivo is not None and "invalida" in motivo,
+          f"motivo={motivo}")
+
+    # dupla chance NUNCA pode aparecer como candidato - e aritmetica do 1X2
+    todos = []
+    for odds in ([1.20, 7.0, 13.0], [1.75, 3.7, 4.6], [2.5, 3.2, 2.8],
+                 [6.5, 4.4, 1.48]):
+        c, m = pe.avalia_evento({"odds": odds})
+        todos += [x["mercado"] for x in c]
+    checa("dupla chance nunca vira candidato",
+          not any("Dupla chance" in m for m in todos),
+          f"apareceu: {[m for m in todos if 'Dupla chance' in m]}")
+
+    # o valor reportado tem que ser o PIOR cenario, nunca o melhor
+    c, _ = pe.avalia_evento({"odds": [1.62, 4.59, 3.95]})
+    for x in c:
+        checa(f"reporta pior cenario em {x['mercado']}",
+              x["prob_pior_cenario"] <= x["prob_melhor_cenario"],
+              "reportou o cenario que agrada")
+
+    # filtro de distintividade: num catalogo homogeneo ninguem se destaca
+    homogeneo = [{"participants": f"A{i} - B{i}", "competition": "L",
+                  "start_time": None, "odds": [2.10, 3.40, 3.30]}
+                 for i in range(40)]
+    res, desc = pe.processa(homogeneo)
+    checa("catalogo homogeneo nao gera palpite (todos sao a taxa-base)",
+          len(res) == 0, f"gerou {len(res)} - filtro de distintividade furou")
+
+
 def main():
-    print("=== SUITE ADVERSARIAL DA EXTRACAO (v26) ===")
+    print("=== SUITE ADVERSARIAL DA EXTRACAO (v27) ===")
     print("Cada caso e uma armadilha real - ver docstrings.")
     for t in (teste_filtros, teste_ja_iniciado, teste_fuso, teste_devig,
-              teste_overround, teste_parser_json, teste_sem_start_time):
+              teste_overround, teste_parser_json, teste_sem_start_time,
+              teste_inversao, teste_pe_engine):
         try:
             t()
         except Exception as e:
