@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Motor de frequencia EMPIRICA sobre os ultimos jogos de um time (v33).
+"""Motor de frequencia EMPIRICA sobre os ultimos jogos de um time (v33-v34).
 
 O QUE ISTO E - O METODO MANUAL DO USUARIO, FORMALIZADO
 --------------------------------------------------------
@@ -15,6 +15,16 @@ ULTIMOS N JOGOS REAIS de um time, contar em quantos deles uma estatistica
 passou de um limiar (ex.: "7 de 10 jogos com +8 escanteios"), e comparar
 essa TAXA EMPIRICA contra a odd oferecida hoje pra esse mesmo limiar. Sem
 lambda, sem Poisson, sem inversao - contagem direta.
+
+JANELA FLEXIVEL, NAO FIXA EM 10 (v34, pedido do usuario): 10 jogos e o
+ALVO, nao um requisito rigido. `taxa_empirica()` aceita qualquer N>=1 -
+o IC de Wilson ja se auto-regula (amostra curta => intervalo largo =>
+limite inferior baixo => dificilmente passa o piso de EV sozinho, sem
+precisar de um corte artificial). `AMOSTRA_MIN=3` e o piso de "vale a
+pena calcular" (abaixo disso o ruido domina e nem vale rodar o numero);
+entre 3 e 10 e faixa normal de operacao, dependendo do que a pesquisa ao
+vivo conseguir achar - NUNCA descartar um jogo com bom sinal so porque
+achou 6 ou 7 jogos em vez de 10.
 
 ESTE MODULO NAO BUSCA DADO NENHUM. A coleta continua sendo pesquisa ao vivo
 (WebSearch/Nimble/Tavily na cascata da regra 6.1 - sofascore, whoscored,
@@ -45,6 +55,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from betting_model import wilson_ci, ev_unitario, prob_combinada, odd_combinada, ev_combinada
 
 COLUNAS_NUMERICAS = ("chutes", "chutes_gol", "escanteios", "cartoes", "faltas", "posse")
+
+# v34: janela flexivel. 10 e o alvo de busca, nao um requisito - ver nota
+# do modulo. Abaixo de AMOSTRA_MIN o ruido domina tanto que nem vale
+# calcular; entre AMOSTRA_MIN e AMOSTRA_ALVO e faixa normal de operacao.
+AMOSTRA_MIN = 3
+AMOSTRA_ALVO = 10
 
 
 def carrega_forma(caminho_csv):
@@ -92,20 +108,26 @@ def avaliar_selecao(resultado_taxa_empirica, odd_oferecida):
     defensavel) contra a probabilidade implicita da odd oferecida hoje.
 
     Retorna dict com prob_conservadora, prob_implicita_odd, edge, ev,
-    veredito (texto). N pequeno (tipico aqui, ~10) faz o wilson_lo cair
-    bem abaixo da taxa bruta quando a amostra e curta - e o proposito:
-    nao deixar um "8/10" parecer mais forte do que a amostra sustenta.
+    veredito (texto). N pequeno faz o wilson_lo cair bem abaixo da taxa
+    bruta quando a amostra e curta - e o proposito: nao deixar um "8/10"
+    parecer mais forte do que a amostra sustenta. Janela flexivel (v34):
+    o piso de "nao decidir" e AMOSTRA_MIN=3, nao um numero alto - abaixo
+    disso o IC de Wilson fica largo demais pra significar algo; entre 3 e
+    10 o proprio Wilson ja penaliza amostra curta sem precisar de corte
+    extra.
     """
     prob_conservadora = resultado_taxa_empirica["wilson_lo"]
     prob_implicita = 1.0 / odd_oferecida
     edge = prob_conservadora - prob_implicita
     ev = ev_unitario(prob_conservadora, odd_oferecida)
-    if resultado_taxa_empirica["n"] < 5:
-        veredito = "amostra insuficiente (N<5) - nao decidir so com isto"
+    if resultado_taxa_empirica["n"] < AMOSTRA_MIN:
+        veredito = f"amostra insuficiente (N<{AMOSTRA_MIN}) - nao decidir so com isto"
     elif ev > 0:
         veredito = "EV positivo pelo limite inferior de Wilson - candidato"
     else:
         veredito = "sem EV pelo limite inferior de Wilson - nao recomendar"
+    if 0 < resultado_taxa_empirica["n"] < AMOSTRA_ALVO:
+        veredito += f" (amostra de {resultado_taxa_empirica['n']}, abaixo do alvo de {AMOSTRA_ALVO} - Wilson ja reflete a incerteza extra)"
     return {
         "n": resultado_taxa_empirica["n"],
         "k": resultado_taxa_empirica["k"],
@@ -117,6 +139,54 @@ def avaliar_selecao(resultado_taxa_empirica, odd_oferecida):
         "odd_oferecida": odd_oferecida,
         "veredito": veredito,
     }
+
+
+def avaliar_confronto(taxa_time_a, taxa_time_b, odd_oferecida,
+                      a_e_dominante=False, b_e_dominante=False):
+    """Combina as taxas empiricas dos DOIS lados de um confronto (mercado
+    de TOTAL do jogo - ex. total de escanteios) num veredito so. v34,
+    pedido do usuario: nao exigir dado dos dois times sempre.
+
+    taxa_time_a / taxa_time_b: dict de taxa_empirica(), ou None quando a
+    pesquisa nao achou dado pra aquele time.
+
+    a_e_dominante / b_e_dominante: flag QUALITATIVA (julgamento do
+    analista, ex. posicao na tabela/nivel de liga - nunca calculada
+    sozinha por falta de dado pra calibrar isso automaticamente) marcando
+    qual lado e o time maior/melhor do confronto.
+
+    Regra:
+      - Os DOIS disponiveis: usa o PIOR (mais conservador) dos dois
+        limites de Wilson - mesma filosofia de "pior cenario sempre" do
+        motor de PE (convergencia dos dois lados).
+      - So UM disponivel: so segue se esse time for o marcado como
+        dominante (a_e_dominante/b_e_dominante) - um time pequeno sozinho
+        nao sustenta palpite de confronto. Sinalizado explicitamente no
+        resultado ("fonte" = "so time A (dominante)" etc.), nunca
+        escondido como se fosse analise dos dois lados.
+      - NENHUM disponivel, ou o unico disponivel nao e o dominante:
+        "dado insuficiente".
+    """
+    if taxa_time_a and taxa_time_b:
+        pior = min((taxa_time_a, taxa_time_b), key=lambda t: t["wilson_lo"])
+        av = avaliar_selecao(pior, odd_oferecida)
+        av["fonte"] = "os dois times (usado o mais conservador dos dois)"
+        return av
+    if taxa_time_a and not taxa_time_b:
+        if not a_e_dominante:
+            return {"fonte": "so time A, mas nao marcado como dominante",
+                    "veredito": "dado insuficiente - sem o time B nem confirmacao de que A domina o confronto"}
+        av = avaliar_selecao(taxa_time_a, odd_oferecida)
+        av["fonte"] = "so time A (marcado como dominante do confronto)"
+        return av
+    if taxa_time_b and not taxa_time_a:
+        if not b_e_dominante:
+            return {"fonte": "so time B, mas nao marcado como dominante",
+                    "veredito": "dado insuficiente - sem o time A nem confirmacao de que B domina o confronto"}
+        av = avaliar_selecao(taxa_time_b, odd_oferecida)
+        av["fonte"] = "so time B (marcado como dominante do confronto)"
+        return av
+    return {"fonte": "nenhum time com dado", "veredito": "dado insuficiente - nenhum dos dois times tem forma recente disponivel"}
 
 
 def _demo():
@@ -149,6 +219,24 @@ def _demo():
     print("\nLEMBRETE: independencia validada empiricamente so entre CATEGORIAS")
     print("DIFERENTES (ver betting_model.prob_combinada) - nunca combinar mercados")
     print("que descrevem o mesmo desfecho subjacente (ex. Over gols + BTTS).")
+
+    print("\n== Janela flexivel (v34): amostra parcial, so 6 jogos achados ==")
+    apenas_6_jogos = [11, 9, 10, 8, 9, 12]  # 5 dos 6 > 8
+    r6 = taxa_empirica(apenas_6_jogos, limiar=8)
+    av6 = avaliar_selecao(r6, odd_oferecida=1.65)
+    print(f"{r6['k']}/{r6['n']} jogos [Wilson inf {r6['wilson_lo']:.1%}] -> {av6['veredito']}")
+    assert r6["n"] == 6, "nao deveria exigir 10 - 6 jogos e amostra valida"
+
+    print("\n== Dado assimetrico (v34): so o time dominante tem forma achada ==")
+    taxa_grande = taxa_empirica([11, 10, 12, 9, 13, 10, 11, 9], limiar=8)  # time grande, 8 jogos
+    av_assim = avaliar_confronto(taxa_grande, None, odd_oferecida=1.65,
+                                 a_e_dominante=True)
+    print(f"so time A (dominante), {taxa_grande['n']} jogos -> fonte: {av_assim['fonte']}")
+    print(f"veredito: {av_assim['veredito']}")
+    av_sem_marcar = avaliar_confronto(taxa_grande, None, odd_oferecida=1.65)
+    assert "insuficiente" in av_sem_marcar["veredito"], \
+        "sem marcar dominancia, um time so nao deveria bastar"
+    print(f"(sem marcar dominancia, o mesmo dado vira: {av_sem_marcar['veredito']})")
 
 
 def main():

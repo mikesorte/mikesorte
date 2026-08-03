@@ -497,7 +497,8 @@ def main():
         err(f"combinadas: falha ao carregar/testar - {e}")
 
     try:
-        from forma_recente import taxa_empirica, taxa_confronto_direto, avaliar_selecao
+        from forma_recente import (taxa_empirica, taxa_confronto_direto, avaliar_selecao,
+                                   avaliar_confronto, AMOSTRA_MIN, AMOSTRA_ALVO)
         ultimos_10 = [10, 9, 10, 11, 9, 8, 9, 7, 10, 9]
         r = taxa_empirica(ultimos_10, limiar=8)
         assert r["k"] == 8 and r["n"] == 10, f"contagem errada: k={r['k']} n={r['n']} (esperado 8/10)"
@@ -512,9 +513,33 @@ def main():
         assert av["prob_conservadora"] == r["wilson_lo"], \
             "avaliar_selecao deveria usar o limite inferior de Wilson, nao a taxa bruta"
         assert abs(av["ev"] - ev_unitario(r["wilson_lo"], 1.65)) < 1e-9, "EV de avaliar_selecao inconsistente"
-        av_pouca_amostra = avaliar_selecao(taxa_empirica([10, 9], limiar=8), odd_oferecida=1.65)
-        assert "insuficiente" in av_pouca_amostra["veredito"], \
-            "N<5 deveria virar veredito de amostra insuficiente, nao decisao normal"
+
+        # v34: janela flexivel (3-10, nao fixa em 10)
+        assert AMOSTRA_MIN == 3, "AMOSTRA_MIN deveria ser 3 (v34, pedido do usuario)"
+        av_abaixo_min = avaliar_selecao(taxa_empirica([10, 9], limiar=8), odd_oferecida=1.65)
+        assert "insuficiente" in av_abaixo_min["veredito"], \
+            f"N<{AMOSTRA_MIN} deveria virar veredito de amostra insuficiente"
+        av_amostra_parcial = avaliar_selecao(taxa_empirica([10, 9, 11], limiar=8), odd_oferecida=1.65)
+        assert "insuficiente" not in av_amostra_parcial["veredito"], \
+            f"N={AMOSTRA_MIN} (piso) NAO deveria ser tratado como insuficiente - janela flexivel"
+        av_6 = avaliar_selecao(taxa_empirica([10, 9, 11, 8, 12, 9], limiar=8), odd_oferecida=1.65)
+        assert str(AMOSTRA_ALVO) in av_6["veredito"], \
+            "amostra abaixo do alvo deveria sinalizar isso no veredito, sem rejeitar so por causa disso"
+
+        # v34: confronto com dado assimetrico - so o time dominante disponivel
+        taxa_grande = taxa_empirica([11, 10, 12, 9, 13, 10, 11, 9], limiar=8)
+        av_dominante = avaliar_confronto(taxa_grande, None, odd_oferecida=1.65, a_e_dominante=True)
+        assert "insuficiente" not in av_dominante["veredito"], \
+            "time dominante sozinho (marcado explicitamente) deveria bastar para avaliar"
+        av_sem_marcar = avaliar_confronto(taxa_grande, None, odd_oferecida=1.65)
+        assert "insuficiente" in av_sem_marcar["veredito"], \
+            "sem marcar dominancia, 1 time sozinho NAO deveria bastar"
+        av_nenhum = avaliar_confronto(None, None, odd_oferecida=1.65)
+        assert "insuficiente" in av_nenhum["veredito"], "sem dado de nenhum time deveria ser insuficiente"
+        taxa_b = taxa_empirica([9, 8, 10, 9], limiar=8)
+        av_dois = avaliar_confronto(taxa_grande, taxa_b, odd_oferecida=1.65)
+        assert av_dois["prob_conservadora"] == min(taxa_grande["wilson_lo"], taxa_b["wilson_lo"]), \
+            "com os dois times disponiveis, deveria usar o mais conservador dos dois"
     except AssertionError as e:
         err(f"forma_recente: REGRESSAO DETECTADA - {e}")
     except Exception as e:

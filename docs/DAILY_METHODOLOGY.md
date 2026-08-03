@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v33 (03/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v34 (03/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -949,6 +949,28 @@ automático — a coleta de forma recente é pesquisa ao vivo por jogo
 aprofundado (2-4/dia), não em escala para o catálogo inteiro. Estatística
 de jogador individual cabe no mesmo processo de coleta quando a fonte
 trouxer, não tem pipeline próprio.
+
+(46) v34 (03/08, pedido do usuário): **janela de "últimos jogos" deixa de
+ser fixa em 10 — vira faixa flexível 3-10; confronto pode seguir com dado
+de só um dos times quando ele for o dominante.**
+
+Correção sobre a decisão 45: exigir os 10 jogos completos faria o sistema
+descartar um palpite bom só por não achar a pesquisa inteira. `AMOSTRA_MIN
+= 3` (`scripts/forma_recente.py`) é o novo piso — abaixo disso o ruído
+domina e nem vale calcular; `AMOSTRA_ALVO = 10` continua sendo o que a
+pesquisa deve tentar achar, mas 3-9 são amostra válida (o IC de Wilson já
+se autorregula: quanto menor N, mais larga a faixa e mais baixo o limite
+inferior — não precisa de corte artificial além do piso de 3).
+
+Nova função `avaliar_confronto(taxa_a, taxa_b, odd, a_e_dominante,
+b_e_dominante)`: com os dois times disponíveis, usa o mais conservador dos
+dois (mesma lógica de convergência do PE); com só UM disponível, só segue
+adiante se esse time estiver marcado como o dominante do confronto (times
+maiores/melhores costumam impor o próprio padrão de jogo mesmo contra
+times menores — julgamento qualitativo do analista, não calculado
+sozinho por falta de dado pra calibrar isso automaticamente); sem marcar
+dominância, ou sem nenhum dos dois, o veredito é "dado insuficiente" —
+nunca finge ter analisado os dois lados quando só teve um.
 
 ## Casas licenciadas (SPA/MF)
 
