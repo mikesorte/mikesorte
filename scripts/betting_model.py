@@ -564,6 +564,59 @@ def brier(pairs):
     return sum((p - o) ** 2 for p, o in pairs) / len(pairs)
 
 
+# ------------------------------------------------------------------ combinadas
+# (v33). O item 10 "Combinadas" da metodologia sempre disse "prob conjunta
+# real; imposto SGP" mas nunca teve formula nenhuma por tras - so texto.
+#
+# VALIDACAO EMPIRICA (nao suposicao): usando os 15.136-15.137 jogos reais do
+# dataset de backtest (Fase 0, v32), medi a correlacao real entre limiares de
+# CATEGORIAS DIFERENTES no mesmo jogo:
+#
+#   Over 2.5 gols   x Over 9.5 escanteios: phi=-0.004 | P(ambos) real 27.4% vs independente 27.5%
+#   Over 2.5 gols   x Over 3.5 cartoes:    phi=+0.011 | P(ambos) real 30.5% vs independente 30.3%
+#   Over 9.5 escant. x Over 3.5 cartoes:   phi=-0.010 | P(ambos) real 34.1% vs independente 34.3%
+#
+# Correlacao desprezivel nos tres pares (razao real/independente entre 0.993
+# e 1.009) - tratar CATEGORIAS DIFERENTES (gols/escanteios/cartoes/chutes)
+# como independentes numa combinada e sustentado por dado real, nao e uma
+# aposta de metodo.
+#
+# ISSO NAO VALE para mercados MECANICAMENTE ligados - ex.: "Over 2.5 gols" e
+# "Ambas Marcam" vem do MESMO placar (nao sao dois eventos, sao duas leituras
+# do mesmo evento). Multiplicar as probabilidades desses dois seria dupla
+# contagem, nao um erro de correlacao - NUNCA combinar pernas que descrevem
+# o mesmo desfecho subjacente (mesma familia de mercado no mesmo jogo).
+def prob_combinada(probs):
+    """Probabilidade conjunta de N pernas, assumindo independencia entre
+    elas. So valido para pernas de CATEGORIAS DIFERENTES (ver nota acima) -
+    o chamador e responsavel por garantir que nenhum par de pernas descreve
+    o mesmo desfecho subjacente."""
+    p = 1.0
+    for x in probs:
+        if not (0.0 <= x <= 1.0):
+            raise ValueError(f"probabilidade fora de [0,1]: {x}")
+        p *= x
+    return p
+
+
+def odd_combinada(odds):
+    """Odd final de uma combinada (produto das odds das pernas)."""
+    o = 1.0
+    for x in odds:
+        if x <= 1.0:
+            raise ValueError(f"odd invalida na combinada: {x}")
+        o *= x
+    return o
+
+
+def ev_combinada(probs, odds):
+    """EV por unidade apostada na combinada inteira - reusa ev_unitario()
+    sobre a probabilidade e a odd JA combinadas."""
+    if len(probs) != len(odds):
+        raise ValueError("probs e odds precisam ter o mesmo tamanho")
+    return ev_unitario(prob_combinada(probs), odd_combinada(odds))
+
+
 # --------------------------------------------------------------------- demo
 def _demo():
     print("== AUTO-TESTE com odds reais Betano de 26/07 (Flamengo x Sao Paulo) ==")
@@ -607,6 +660,22 @@ def _demo():
     assert lam_sem_hist == 9.5, "sem historico tem que devolver a media da liga"
     assert 6.0 < lam < 9.5, "com historico abaixo da liga, resultado tem que ficar entre os dois"
     print("Auto-testes de mercados de contagem OK.")
+
+    print("\n== Combinadas (v33): prob_combinada/odd_combinada/ev_combinada ==")
+    # exemplo do proprio usuario: +8.5 escanteios @1.30 + +1.5 gols @1.20
+    odds_pernas = [1.30, 1.20]
+    probs_pernas = [0.75, 0.83]  # ilustrativo - viria de taxa_empirica() (forma_recente.py)
+    odd_final = odd_combinada(odds_pernas)
+    prob_final = prob_combinada(probs_pernas)
+    ev_final = ev_combinada(probs_pernas, odds_pernas)
+    print(f"pernas: odds {odds_pernas} probs {probs_pernas}")
+    print(f"odd combinada = {odd_final:.2f} | prob combinada = {prob_final:.1%} | "
+          f"EV = {ev_final:+.3f}u")
+    assert abs(odd_final - 1.56) < 1e-9, "odd_combinada(1.30,1.20) deveria ser 1.56"
+    assert abs(prob_final - 0.6225) < 1e-9, "prob_combinada(0.75,0.83) deveria ser 0.6225"
+    assert abs(ev_final - ev_unitario(prob_final, odd_final)) < 1e-9, \
+        "ev_combinada deveria bater com ev_unitario sobre os valores combinados"
+    print("Auto-testes de combinadas OK.")
 
 
 if __name__ == "__main__":

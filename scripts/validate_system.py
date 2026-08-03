@@ -469,6 +469,57 @@ def main():
     except Exception as e:
         err(f"odds_sources (multi-casa): falha ao carregar/testar - {e}")
 
+    # 3j) regressao no motor de frequencia empirica + combinadas (v33).
+    # Formaliza o metodo manual do usuario (ultimos N jogos, contagem de
+    # limiar, Wilson como numero conservador) e as funcoes de combinada
+    # (validadas empiricamente contra o dataset de backtest - ver
+    # betting_model.prob_combinada).
+    try:
+        from betting_model import prob_combinada, odd_combinada, ev_combinada
+        assert abs(odd_combinada([1.30, 1.20]) - 1.56) < 1e-9, "odd_combinada(1.30,1.20) deveria ser 1.56"
+        assert abs(prob_combinada([0.75, 0.83]) - 0.6225) < 1e-9, "prob_combinada(0.75,0.83) deveria ser 0.6225"
+        assert abs(ev_combinada([0.75, 0.83], [1.30, 1.20])
+                   - ev_unitario(prob_combinada([0.75, 0.83]), odd_combinada([1.30, 1.20]))) < 1e-9, \
+            "ev_combinada deveria bater com ev_unitario sobre os valores ja combinados"
+        try:
+            prob_combinada([0.5, 1.5])
+            err("prob_combinada aceitou probabilidade fora de [0,1] (deveria rejeitar)")
+        except ValueError:
+            pass
+        try:
+            odd_combinada([1.5, 0.9])
+            err("odd_combinada aceitou odd invalida <=1.0 (deveria rejeitar)")
+        except ValueError:
+            pass
+    except AssertionError as e:
+        err(f"combinadas: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"combinadas: falha ao carregar/testar - {e}")
+
+    try:
+        from forma_recente import taxa_empirica, taxa_confronto_direto, avaliar_selecao
+        ultimos_10 = [10, 9, 10, 11, 9, 8, 9, 7, 10, 9]
+        r = taxa_empirica(ultimos_10, limiar=8)
+        assert r["k"] == 8 and r["n"] == 10, f"contagem errada: k={r['k']} n={r['n']} (esperado 8/10)"
+        assert abs(r["taxa"] - 0.8) < 1e-9, "taxa bruta deveria ser 80%"
+        assert r["wilson_lo"] < r["taxa"] < r["wilson_hi"], "wilson_lo/hi deveriam cercar a taxa bruta"
+        r_com_none = taxa_empirica([10, None, 9, None, 11], limiar=8)
+        assert r_com_none["n"] == 3, "taxa_empirica deveria ignorar valores None, nao contar como amostra"
+        r_vazio = taxa_empirica([], limiar=8)
+        assert r_vazio["n"] == 0 and r_vazio["taxa"] == 0.0, "amostra vazia deveria dar n=0 sem levantar excecao"
+        assert taxa_confronto_direto([1, 2], limiar=1)["n"] == 2, "taxa_confronto_direto deveria reusar taxa_empirica"
+        av = avaliar_selecao(r, odd_oferecida=1.65)
+        assert av["prob_conservadora"] == r["wilson_lo"], \
+            "avaliar_selecao deveria usar o limite inferior de Wilson, nao a taxa bruta"
+        assert abs(av["ev"] - ev_unitario(r["wilson_lo"], 1.65)) < 1e-9, "EV de avaliar_selecao inconsistente"
+        av_pouca_amostra = avaliar_selecao(taxa_empirica([10, 9], limiar=8), odd_oferecida=1.65)
+        assert "insuficiente" in av_pouca_amostra["veredito"], \
+            "N<5 deveria virar veredito de amostra insuficiente, nao decisao normal"
+    except AssertionError as e:
+        err(f"forma_recente: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"forma_recente: falha ao carregar/testar - {e}")
+
     # relatorio
     # O banner de rota (v17-d) foi REMOVIDO em 02/08: era uma muleta para o
     # periodo em que o servidor Claude_Code_Remote estava fora e as triggers
