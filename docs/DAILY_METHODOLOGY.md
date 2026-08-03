@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v30 (03/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v31 (03/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -902,8 +902,8 @@ CONSOLIDADO; (B) PDF anexado; (C) resumo curto no chat (3-5 linhas).
    retry/backoff).
 8. `python3 scripts/ledger_stats.py` → usar ESTA saída para todos os
    números do relatório.
-9. Relatório HTML → PDF (`html_to_pdf.js` no scratchpad) → `SendUserFile`;
-   resumo no chat.
+9. Relatório: `python3 scripts/generate_report.py --data DD/MM` → PDF via
+   `SendUserFile`; resumo no chat. Ver "## Geração do PDF" abaixo.
 
 ## Histórico de desempenho (estado curto; detalhe no git/ledger)
 
@@ -1006,10 +1006,30 @@ muitos; cobertura parcial declarada.
 
 ## Geração do PDF
 
-HTML limpo → `html_to_pdf.js` (Chromium local) ou skill pdf. Quadro-resumo
-primeiro; blocos por jogo; tabelas; filas; histórico via
-`ledger_stats.py`; rodapé com gestão de banca + 1 linha de jogo
-responsável (redação variada). Anexar via `SendUserFile`.
+`python3 scripts/generate_report.py --data YYYY-MM-DD` (v31, 03/08).
+Substitui a referência antiga a `html_to_pdf.js`, que nunca existiu
+commitada no repo — cada execução reinventava o HTML a mão no scratchpad
+(efêmero, não sobrevive entre sessões/Routines), e por isso a regra do
+quadro-resumo (decisão 16, v6) se perdia na prática. O script agora e
+persistido e versionado:
+
+- Lê `data/dumps/YYYY-MM-DD-jogos.csv` (todos os jogos varridos no dia —
+  confronto/competição/horário/casa/odds 1X2; criar esse CSV a partir da
+  varredura ampla do passo 4/4b, mesmo para jogos não aprofundados),
+  `data/apostas_ledger.csv` e `data/pe_ledger.csv` (linhas do dia) e a saída
+  de `scripts/ledger_stats.py`.
+- Gera HTML com QUADRO-RESUMO de todos os jogos primeiro, depois um bloco
+  "PALPITES DO DIA" destacado (lista numerada no formato `[Mercado] —
+  [Seleção] no jogo [Confronto] (Casa: X, odd: Y)`; se não houver nenhum
+  palpite, vira banner "SEM PALPITES HOJE" com motivo por jogo — nunca fica
+  implícito), depois cards por jogo (odds/de-vig/edge/status, com a nota de
+  auditoria completa em `<details>` secundário) e por fim os números
+  oficiais de `ledger_stats.py`.
+- Converte para PDF via Chromium headless local (`--print-to-pdf
+  --no-pdf-header-footer`, sem cabeçalho/rodapé de URL/data do Chrome) —
+  não precisa instalar `playwright`/`puppeteer`. Anexar via `SendUserFile`.
+- `--no-pdf` gera só o HTML (mais rápido para iterar visualmente antes de
+  gerar o PDF final).
 
 ## Resposta no chat
 
