@@ -61,31 +61,33 @@ from betting_model import (poisson_dixon_coles, gols_dixon_coles,
                            InversaoFalhou)
 import scan_odds
 
-# Cenarios de robustez: (rho, forma_dispersao). rho varia na faixa da
-# literatura; 'forma' controla a superdispersao dos gols (None = Poisson puro).
+# Cenarios de robustez: (rho, forma_dispersao). forma None = Poisson puro.
 #
-# A dispersao entrou em v28 depois que o estudo de ma-especificacao
-# (scripts/backtest.py) mostrou vies SISTEMATICO com Poisson puro: Over 2.5
-# +17pp, BTTS +20pp, Under na direcao oposta. Gols reais tem variancia maior
-# que a media, e Poisson subestima P(0 gols) - o que infla exatamente "ambas
-# marcam" e "over". Nao era ruido corrigivel com mais amostra; era o modelo.
+# HISTORICO IMPORTANTE - NAO REINTRODUZIR DISPERSAO SEM DADO REAL (v29)
+# ---------------------------------------------------------------------
+# Em 02/08 (v28) eu adicionei cenarios superdispersos (forma 8.0 a 2.5)
+# porque um estudo de MA-ESPECIFICACAO SIMULADO mostrava vies grande com
+# Poisson puro (Over 2.5 +17pp, BTTS +20pp). Reportei "Brier -64%".
 #
-# Incluir cenarios superdispersos faz o PIOR CENARIO (que e o que o motor
-# reporta) ja absorver esse erro, em vez de depender de um fator de correcao
-# chumbado que precisaria ser recalibrado a cada mudanca.
+# Em 03/08, com 1916 jogos REAIS (odds Bet365 + placar final), o veredito se
+# inverteu: a dispersao PIOROU o Brier em 1.0% e jogou 4 mercados para fora
+# do intervalo de confianca - BTTS de +1.6% para -9.4%, Over 1.5 de +1.3%
+# para -6.9%. Poisson puro ja estava calibrado no dado real (vies de +1.2%
+# a -2.3%).
+#
+# O erro: o "mundo verdadeiro" simulado tinha superdispersao porque EU a
+# coloquei la. Corrigir o modelo para bater com a minha propria invencao e
+# overfitting a fantasia. A literatura (Maher 1982) ja apontava razao
+# variancia/media perto de 1 no futebol moderno - eu so fui ler depois.
+#
+# Fica: rho variavel (efeito pequeno e bem estabelecido) + variacao de
+# metodo de de-vig. gols_dixon_coles(forma=) continua no motor porque e
+# codigo correto e testado, mas NAO entra em producao sem evidencia de
+# dado real.
 CENARIOS = (
-    (-0.18, None),   # Poisson puro, rho forte
-    (-0.11, None),   # Poisson puro, rho central
-    (-0.04, None),   # Poisson puro, rho fraco
-    (-0.11, 8.0),    # superdispersao leve
-    (-0.11, 5.0),    # superdispersao moderada
-    (-0.11, 3.5),    # superdispersao forte
-    # Cenario 'jogo com choque' (v28): expulsao/lesao muda o jogo DEPOIS que a
-    # odd foi fixada. Nenhuma odd pre-jogo contem essa informacao, e o efeito
-    # e dispersao efetiva ainda maior. Nao e chute para ajustar o numero - e
-    # um mecanismo real que o estudo mostrou nao estar coberto pela faixa
-    # anterior (o valor verdadeiro de Over ficava ABAIXO de todos os cenarios).
-    (-0.11, 2.5),
+    (-0.18, None),   # rho forte
+    (-0.11, None),   # rho central
+    (-0.04, None),   # rho fraco
 )
 
 # Pisos por faixa, aplicados ao PIOR cenario. Calibrados para serem
@@ -169,12 +171,15 @@ def avalia_evento(ev, so_probabilidades=False):
     variantes = [(rho, forma, justo_power) for rho, forma in CENARIOS]
     # de-vigs alternativos como fonte extra de variacao. Shin entrou em v28
     # por causa do vies favorito-azarao (ver betting_model.devig_shin).
+    # Shin validado em dado real (v29): melhora o Brier e encolhe o vies em
+    # TODOS os mercados, e a literatura (Strumbelj 2014) reporta estimativas
+    # nao-enviesadas na Premier League. Ganho pequeno mas consistente.
     for alt in (devig_proporcional, devig_shin):
         try:
             pa = alt(odds)
         except Exception:
             continue
-        variantes += [(-0.11, None, pa), (-0.11, 5.0, pa), (-0.11, 3.5, pa)]
+        variantes.append((-0.11, None, pa))
 
     por_mercado = {}
     lambdas_ref = None

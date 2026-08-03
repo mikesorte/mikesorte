@@ -682,6 +682,54 @@ adiada para dado real. **Isto exige catálogo real persistido + resultados
 observados — é a próxima evolução, e ela depende de dado, não de mais
 código.**
 
+(42) v29 (03/08, revisão semanal): **canal de dado histórico encontrado — e
+o backtest real REVERTEU a "melhoria" de ontem.**
+
+**Descoberta que destrava tudo.** Testando o allowlist de rede durante a
+auditoria: `raw.githubusercontent.com` **responde 200**, enquanto
+`football-data.co.uk` direto dá 403. Existia um canal aberto para dado
+histórico com odds o tempo todo. Baixados e persistidos em `data/backtest/`:
+**1916 jogos, 13 ligas, odds reais da Bet365 (B365H/D/A) + placar final
+real.**
+
+**Terceira vez a mesma classe de erro** (ver decisões 36 e 39): declarar algo
+impossível sem ter testado a alternativa óbvia. **Regra: antes de declarar
+bloqueio estrutural, ENUMERAR os canais e testar um por um. "A rede está
+bloqueada" é generalização, não diagnóstico.**
+
+**O veredito do dado real (`scripts/backtest_real.py`, N=11.496 pares):**
+
+| Configuração | Viés global | Brier |
+|---|---|---|
+| v27 — Poisson + POWER | −0,2% | 0,22807 |
+| Poisson + **Shin** | −0,1% | **0,22785** |
+| v28 — dispersão + Shin | **−4,0%** | 0,23042 |
+
+**A dispersão introduzida ontem (v28) PIOROU o modelo em dado real.** BTTS
+foi de +1,6% para **−9,4%**; Over 1.5 de +1,3% para **−6,9%**; quatro
+mercados saíram do intervalo de confiança. Poisson puro **já estava
+calibrado** (viés de +1,2% a −2,3%).
+
+**Causa do erro:** o "mundo verdadeiro" simulado do v28 tinha superdispersão
+porque **eu a coloquei lá**. Corrigir o modelo para bater com a própria
+invenção é overfitting a uma fantasia — o `--demo` do `pe_engine` já
+avisava sobre circularidade, e eu caí na mesma armadilha um nível acima. A
+literatura (Maher 1982: razão variância/média ≈ 1 no futebol moderno) já
+apontava isso; li depois de mudar o código.
+
+**Aplicado (Categoria A — reverter regressão própria, com evidência forte):**
+cenários de dispersão **removidos de produção**. `gols_dixon_coles(forma=)`
+fica no motor (código correto e testado) mas **não entra em produção sem
+evidência de dado real**.
+
+**Mantido:** o de-vig de **Shin**, que melhora o Brier e encolhe o viés em
+**todos** os mercados, com respaldo publicado (Štrumbelj 2014: estimativas
+não-enviesadas na Premier League).
+
+**Lição de processo, mais importante que a correção:** validação contra
+simulação própria não é validação — é eco. Toda mudança de modelo agora
+exige passar por `backtest_real.py` antes de ir a produção.
+
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17
 colunas — vírgula não escapada dentro do campo `casa` (ex.: `Superbet (odds
