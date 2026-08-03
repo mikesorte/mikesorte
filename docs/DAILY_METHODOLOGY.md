@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v31 (03/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v32 (03/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -799,6 +799,87 @@ teste negativo (reintroduzir a corrupção → exit 1; restaurar → limpo).
 **Regra:** todo campo de texto livre que possa conter vírgula vai entre
 aspas, sempre.
 
+(44) v32 (03/08, pedido do usuário): **regra 8/9 sai do texto e vira
+código — mercados de limiar (escanteios/cartões/chutes) calibrados contra
+dado real; line-shopping real; 1X2 deixa de ser default por padrão de
+código, não só por instrução.**
+
+Motivação: o usuário observou (corretamente, o ledger confirma) que a
+execução vinha concentrada em 1X2 apesar da regra 8 sempre ter dito o
+contrário, e que o sistema só cotava uma casa (Betano) apesar da regra 9
+("line-shopping sempre"). As duas regras já existiam por escrito desde v6/
+v14 — nunca tinham virado função, filtro ou dado.
+
+**Fase 0 — dataset.** `data/backtest/*.csv` tinha escanteios/chutes/
+cartões em só 5 das 13 ligas (France F1, Germany D1, Italy I1, Scotland
+SC0, Spain SP1), 697 jogos de meia temporada 2013 — pouco pra calibrar
+com confiança (mesma lição do custo de decidir com dado insuficiente da
+decisão 41/v29). `scripts/baixa_dados_backtest.py` expandiu para 15.150
+jogos (2000-2013, mesmo canal `raw.githubusercontent.com` da decisão 41,
+repositório `jokecamp/FootballData`, que espelha o CSV bruto da
+football-data.co.uk sem reformatar). Limitação declarada: dado só vai até
+~2013, sem temporada recente (futebol mudou — VAR, pressing).
+
+**Fase 1-2 — modelos testados contra dado real, com veredito por mercado:**
+
+| Mercado | N | Config vencedora | Viés máx. | Veredito |
+|---|---|---|---|---|
+| Escanteios (total) | 15.137 | Poisson puro | 1,2% | **ACEITO COM RESSALVA** |
+| Cartões (total) | 15.148 | Poisson puro | 1,5% | REJEITADO |
+| Chutes a gol/SOT (total) | 15.133 | Poisson puro | 1,6% | REJEITADO |
+
+Em TODOS os três, testar dispersão (binomial negativa, `negbin_total()`)
+**piorou** Brier e viés — mesma lição da decisão 41/v29, agora replicada
+para 3 mercados novos, confirmando que não é específico de gols. Para
+cartões, testado também sweep de força de shrinkage (alpha 0,5-20) e
+separar histórico por mando casa/fora — nenhum resolveu o viés residual
+(o segundo até piorou: menos amostra por bucket custa mais que o sinal
+ganho). Chutes rejeitado como esperado — são endógenos ao placar em tempo
+real (time perdendo aumenta volume/piora qualidade), sinal que a
+heurística de "pace" pré-jogo (EWMA + shrinkage à média da liga,
+`betting_model.ewma_shrinkage()`) não capta.
+
+Achado metodológico extra: o teste de sanidade original (walk-forward tem
+que perder do "oráculo" que vê a temporada inteira) deu falso alarme em
+chutes — o walk-forward honesto bateu o oráculo em Brier. Investigado com
+um teste de embaralhamento (`teste_embaralhamento()`): a vantagem some
+quando a ordem cronológica é destruída, confirmando sinal real de
+recência via EWMA (o oráculo usa média plana, sem peso por recência — não
+é um teto matemático garantido), não vazamento de dado futuro.
+
+**Fase 3 — gate de código.** `pe_engine.domina_1x2(candidatos, prob_1x2)`:
+compara uma seleção 1X2 hipotética contra os candidatos derivados do
+mesmo jogo (gols/BTTS de `avalia_evento()`; escanteios de
+`candidato_escanteios()`, que já desconta o viés máximo documentado da
+Fase 1 antes de aplicar os pisos Alta/Moderada). Se um derivado supera o
+1X2 por folga clara (5pp default), a regra 8 manda preferir o derivado.
+Cartões e chutes (rejeitados) não entram como candidatos.
+
+**Fase 4 — line-shopping real.** `scan_odds.parse_mres_blocks()` ganhou
+campo `casa`; `scripts/casa_matcher.py` (novo) cruza fixtures entre dumps
+de casas diferentes por nome normalizado de time + janela de horário;
+`odds_sources.plano_multi_casa(n=3)` devolve N casas distintas a tentar
+(não só a primeira que funciona, como a decisão 36/v23 tinha fixado).
+Bug real encontrado testando isto: `plano_de_tentativa()` nunca
+considerava a ferramenta `nimble_extract` (só `nimble_extract_async`),
+então a ÚNICA combinação com sucesso comprovado do sistema (Betano +
+`nimble_extract`, driver=vx10, decisão 36/v23) nunca aparecia no plano —
+corrigido. **Regra dura preservada sem exceção:** o teste 9.1 usa sempre
+odds dos dois lados da MESMA casa; line-shopping só escolhe o melhor
+preço de EXECUÇÃO depois que o edge já foi decidido — nunca mistura casas
+no cálculo da probabilidade justa. Critério de desempate: se a casa de
+melhor preço não tiver o 1X2 completo extraível, usar outra casa para o
+edge e só trocar o preço de execução (`casa_matcher.casa_do_edge()`).
+
+**Fora de escopo, declarado:** props de jogador (chutes/desarmes/passes
+de um jogador específico) — nenhuma fonte de dado no repo nem histórico,
+seria scraping novo do zero. Cartões ajustados por árbitro — os CSVs não
+têm coluna de árbitro. Confirmação pós-jogo de escanteios/cartões/chutes
+— não há fonte confiável hoje (o único PE de escanteios já tentado, id=2
+do pe_ledger, foi arquivado por "contagem exata nunca encontrada"); é um
+problema de infraestrutura de dado paralelo ao modelo, não resolvido
+aqui.
+
 ## Casas licenciadas (SPA/MF)
 
 Betano, Bet Nacional, Superbet, Bet365, Sportingbet, KTO, Novibet,
@@ -951,18 +1032,35 @@ muitos; cobertura parcial declarada.
      habilitados; casa própria > agregador; agregador exige 3+ fontes;
      descartar soma implícita <100%.
 6.2. Modelos por mercado (EWMA na entrada): (a) escanteios Poisson
-     composto; (b) cartões/faltas aditivo + árbitro; (b2) faltas por
-     jogador; (c) finalizações/SOT; (d) desarmes/defesas; (e) gols = item
-     4; (f) 1X2 não é default — empate em risco → DNB/AH/DC. Tabela de
-     cobertura obrigatória. Streaks não são i.i.d.
+     composto — **IMPLEMENTADO v32**: `betting_model.poisson_total()` +
+     `pe_engine.candidato_escanteios()`, testado contra 15.137 jogos reais
+     (2000-2013, 5 ligas), ACEITO COM RESSALVA (viés máx. 1,2%, declarar
+     sempre que usado — ver decisão 44); (b) cartões/faltas aditivo +
+     árbitro — testado v32 (`backtest_cartoes.py`, N=15.148), **REJEITADO**
+     (viés residual não resolvido por 3 hipóteses testadas; sem dado de
+     árbitro disponível); b2) faltas por jogador — sem dado, não tentado;
+     (c) finalizações/SOT — testado v32 (`backtest_chutes.py`, N=15.133),
+     **REJEITADO** (endógeno ao placar em tempo real, esperado); (d)
+     desarmes/defesas — sem dado de jogador, não tentado (ver decisão 44);
+     (e) gols = item 4; (f) 1X2 não é default — empate em risco → DNB/AH/DC,
+     e desde v32 **código-forçado** via `pe_engine.domina_1x2()` sempre que
+     houver candidato derivado aprovado para o mesmo jogo, não só quando há
+     risco de empate. Tabela de cobertura obrigatória. Streaks não são
+     i.i.d.
 7. Confiabilidade por mercado: escanteios/gols boa; 1X2/BTTS líquidos;
    cartões dependem de árbitro; props moderada-baixa.
 8. Favoritos melhor precificados; valor tende a ligas menores/props/
-   faixas (folga maior); conflito de sinais = não recomendar.
+   faixas (folga maior); conflito de sinais = não recomendar. Desde v32
+   isto é **portão de código** (`pe_engine.domina_1x2()`), não só aviso
+   retrospectivo — ver decisão 44.
 8.1. Anti-overfitting: critério central só muda com N≥300-500 +
      confirmação do usuário. v5 em diante = mudanças de processo
      autorizadas.
-9. Odds: exclusivamente as 9 casas; line-shopping sempre; sem confirmação
+9. Odds: exclusivamente as 9 casas; line-shopping sempre — desde v32 com
+   infraestrutura real (`odds_sources.plano_multi_casa()`,
+   `scan_odds.py --casa`, `casa_matcher.py`), não só instrução manual; a
+   regra 9.1 continua exigindo os dois lados da MESMA casa mesmo quando
+   outra casa tem preço melhor (ver decisão 44) — sem confirmação
    → PE.
 9.1. NO-VIG: dois lados MESMA casa → `devig_power()` → prob justa; edge
      numérico + EV exibidos; folga clara obrigatória; PE testável =
