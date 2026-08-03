@@ -14,6 +14,9 @@ Modelos implementados, todos com fonte na metodologia ja aprovada (itens 1, 4, 6
   - kelly_fraction: fracao de Kelly (para uso FUTURO pos-validacao; quarter-Kelly)
   - ev_unitario: valor esperado por unidade apostada
   - clv: closing line value
+  - poisson_total / poisson_grid / ewma_shrinkage (v32): mercados de
+    contagem (escanteios/cartoes/chutes) - ver scripts/backtest_escanteios.py
+    para o veredito de calibracao real antes de usar em producao
 """
 import math
 import sys
@@ -157,6 +160,155 @@ def win_by_margin(model_out, min_margin):
     o mandante precisa reverter o placar agregado por N gols (ex.: Grêmio
     precisando vencer por 2+ apos derrota de 3-2 na ida)."""
     return sum(p for m, p in model_out["margins"].items() if m >= min_margin)
+
+
+# --------------------------------------------------------- mercados de contagem
+# (escanteios, cartoes, chutes - v32). Diferente de gols, NAO usam a correcao
+# Dixon-Coles (tau): essa correcao existe pela sub-representacao de placares
+# baixos ESPECIFICA de futebol (poucos gols, dependencia tatica em jogos
+# apertados 0-0/1-0/0-1/1-1) - nao ha razao matematica pra portar pra
+# contagens de media mais alta (escanteios ~5-6/lado, chutes ~12-13/lado).
+#
+# Duas funcoes, nao uma generica, porque o problema estatistico muda por
+# tipo de mercado (ver docs/DAILY_METHODOLOGY.md v32, achado do backtest):
+#
+#   poisson_total(): mercados de TOTAL do jogo (over/under N.5). O total e
+#   modelado como UMA Poisson so, com lambda_total estimado diretamente -
+#   NUNCA como soma de duas marginais independentes. Motivo: escanteios/
+#   cartoes dos dois lados sao correlacionados por estado de placar (time
+#   perdendo pressiona mais) e abertura do jogo (jogo aberto gera evento
+#   pros dois lados) - Var(H+A) != Var(H)+Var(A), somar duas Poisson
+#   independentes SUBESTIMARIA a variancia real do total.
+#
+#   poisson_grid(): mercados POR TIME (over/under do time A isolado). A
+#   covariancia entre os lados nao importa aqui (e a marginal de UM time
+#   so), mas a variancia da propria marginal pode estar subestimada pelo
+#   mesmo motivo (pressao tardia/estado de jogo) - LIMITACAO DECLARADA, nao
+#   corrigida nesta versao por falta de dado que isole o efeito.
+def poisson_total(lambda_total, linhas=(8.5, 9.5, 10.5), max_n=30):
+    """Probabilidade de over/under para o TOTAL de um evento de contagem
+    (escanteios, cartoes, chutes) no jogo inteiro, via Poisson simples.
+
+    lambda_total: media esperada do TOTAL (casa+fora), estimada diretamente
+    (ex.: ewma_shrinkage() sobre o total historico), nunca como soma de duas
+    marginais independentes - ver nota do bloco acima.
+
+    max_n default 30 (bem maior que o max_goals=10 do Dixon-Coles de
+    proposito - escanteios/chutes passam de 10-15 fácil; truncar cedo
+    distorce o over das linhas altas).
+
+    Retorna dict {"over_8.5": p, "under_8.5": 1-p, ...} por linha, mais
+    "media" e "distribuicao" (grid completo, para auditoria/self-teste de
+    que max_n cobre massa suficiente).
+    """
+    if lambda_total <= 0:
+        raise ValueError(f"lambda_total tem que ser positivo, recebido {lambda_total}")
+    dist = {k: _pois(lambda_total, k) for k in range(max_n + 1)}
+    out = {"media": lambda_total, "distribuicao": dist}
+    for linha in linhas:
+        piso = int(math.floor(linha))  # 8.5 -> acumula k<=8 no under
+        under = sum(p for k, p in dist.items() if k <= piso)
+        over = 1.0 - under  # inclui a cauda alem de max_n - nunca subestima o over
+        out[f"under_{linha}"] = under
+        out[f"over_{linha}"] = over
+    return out
+
+
+def negbin_total(lambda_total, forma, linhas=(8.5, 9.5, 10.5), max_n=30):
+    """Igual a poisson_total, mas com a marginal SUPERDISPERSA (binomial
+    negativa, mistura Poisson-gama) - mesmo mecanismo de _negbin() usado em
+    gols_dixon_coles(). 'forma' baixo = mais superdisperso; None reduz a
+    poisson_total() (mesma interface).
+
+    NAO e a mesma decisao do v28 em gols (que foi REJEITADA por backtest
+    real - ver docstring de gols_dixon_coles): aqui a superdispersao so
+    entra em producao SE scripts/backtest_escanteios.py validar melhora
+    real de calibracao contra dado real, testado do zero para este
+    mercado - nunca por analogia com outro mercado.
+    """
+    if forma is None:
+        return poisson_total(lambda_total, linhas, max_n)
+    if lambda_total <= 0:
+        raise ValueError(f"lambda_total tem que ser positivo, recebido {lambda_total}")
+    dist = {k: _negbin(lambda_total, k, forma) for k in range(max_n + 1)}
+    out = {"media": lambda_total, "distribuicao": dist}
+    for linha in linhas:
+        piso = int(math.floor(linha))
+        under = sum(p for k, p in dist.items() if k <= piso)
+        out[f"under_{linha}"] = under
+        out[f"over_{linha}"] = 1.0 - under
+    return out
+
+
+def poisson_grid(lambda_a, lambda_b, max_n=15):
+    """Grid conjunto Poisson INDEPENDENTE para um evento de contagem por
+    time (ex.: escanteios do mandante vs escanteios do visitante).
+
+    LIMITACAO DECLARADA: assume independencia entre os dois lados - ver nota
+    do bloco acima sobre correlacao por estado de jogo. Aceita como limite
+    conhecido, nao corrigida por falta de dado que isole o efeito.
+
+    Retorna dict com "media_a", "media_b" e "grid" (dict (a,b)->p) - usar
+    junto de over_under_time() para extrair over/under de um lado.
+    """
+    if lambda_a <= 0 or lambda_b <= 0:
+        raise ValueError(f"lambdas tem que ser positivos, recebido ({lambda_a}, {lambda_b})")
+    grid, total = {}, 0.0
+    for a in range(max_n + 1):
+        pa = _pois(lambda_a, a)
+        for b in range(max_n + 1):
+            p = pa * _pois(lambda_b, b)
+            grid[(a, b)] = p
+            total += p
+    for k in grid:
+        grid[k] /= total
+    return {"media_a": lambda_a, "media_b": lambda_b, "grid": grid}
+
+
+def over_under_time(grid_out, lado, linha):
+    """P(over linha) para um dos dois lados de poisson_grid(). lado: 'a' ou 'b'."""
+    if lado not in ("a", "b"):
+        raise ValueError(f"lado tem que ser 'a' ou 'b', recebido {lado!r}")
+    idx = 0 if lado == "a" else 1
+    piso = int(math.floor(linha))
+    under = sum(p for par, p in grid_out["grid"].items() if par[idx] <= piso)
+    return 1.0 - under
+
+
+def ewma_shrinkage(historico, media_liga, alpha=3.0, decay=0.9):
+    """Estima um lambda (media esperada) para um time a partir do seu
+    HISTORICO PRIOR (lista de valores realizados, cronologica, mais recente
+    por ULTIMO) via EWMA, regredido a media da liga - shrinkage continuo,
+    nao corte rigido por N de jogos.
+
+    POR QUE EWMA + SHRINKAGE, NAO MEDIA SIMPLES OU CORTE FIXO (v32): forma
+    recente pesa mais que forma antiga (regra 6.2 "EWMA na entrada" ja
+    prescrevia isso, nunca implementado em codigo). Com poucos jogos por
+    time (~17-19 antes do warm-up nas ligas com stats), um corte tipo "so
+    avalia depois de N=5 jogos" descarta parte ja escassa do dado - o
+    shrinkage continuo usa TODO historico disponivel, com peso maior na
+    media da liga quando o time tem poucos jogos, decaindo conforme o time
+    acumula historico proprio.
+
+    VAZAMENTO (responsabilidade do CHAMADOR, nao desta funcao): 'historico'
+    e 'media_liga' TEM que conter so jogos anteriores ao que esta sendo
+    previsto (walk-forward) - esta funcao so agrega o que recebe, nao sabe
+    nem pode saber se ha vazamento upstream.
+
+    alpha: peso (em "jogos equivalentes") dado a media da liga na etapa de
+    shrinkage. decay: fator de decaimento do EWMA por jogo mais antigo
+    (0.9 = jogo de 5 partidas atras pesa 0.9^5 ~= 59% do jogo mais recente).
+    """
+    n = len(historico)
+    if n == 0:
+        return media_liga
+    soma, peso_total, peso = 0.0, 0.0, 1.0
+    for valor in reversed(historico):  # do mais recente pro mais antigo
+        soma += peso * valor
+        peso_total += peso
+        peso *= decay
+    ewma_time = soma / peso_total
+    return (alpha * media_liga + n * ewma_time) / (alpha + n)
 
 
 # ------------------------------------------------------------------- de-vig
@@ -433,6 +585,28 @@ def _demo():
     print(f"quarter-Kelly(0.55, 2.00) = {kelly_fraction(0.55, 2.0):.2%} da banca")
     print(f"CLV(entrada 2.10, fechamento 1.95) = {clv(2.10, 1.95):+.2%}")
     print(f"Brier[(0.65,1),(0.56,0)] = {brier([(0.65,1),(0.56,0)]):.4f}")
+
+    print("\n== Mercados de contagem (v32): poisson_total/poisson_grid/ewma_shrinkage ==")
+    pt = poisson_total(9.8, linhas=(8.5, 9.5, 10.5))
+    massa = sum(pt["distribuicao"].values())
+    print(f"total escanteios lambda=9.8 -> over9.5 {pt['over_9.5']:.1%} / "
+          f"under9.5 {pt['under_9.5']:.1%} (massa coberta por max_n: {massa:.5f})")
+    assert abs(pt["over_9.5"] + pt["under_9.5"] - 1.0) < 1e-9, "over+under tem que somar 1"
+    assert massa > 0.999, "max_n=30 devia cobrir >99.9% da massa em lambda=9.8"
+    assert pt["over_8.5"] > pt["over_9.5"] > pt["over_10.5"], "over tem que cair com a linha"
+
+    pg = poisson_grid(5.2, 4.6)
+    massa_g = sum(pg["grid"].values())
+    over_a = over_under_time(pg, "a", 5.5)
+    print(f"grid por time (5.2/4.6) -> over5.5 lado A: {over_a:.1%} (massa: {massa_g:.5f})")
+    assert massa_g > 0.999, "max_n=15 devia cobrir >99.9% da massa em lambda~5"
+
+    lam = ewma_shrinkage([6, 8, 5], media_liga=9.5, alpha=3.0)
+    lam_sem_hist = ewma_shrinkage([], media_liga=9.5)
+    print(f"ewma_shrinkage([6,8,5], liga=9.5) = {lam:.2f} | sem historico = {lam_sem_hist:.2f}")
+    assert lam_sem_hist == 9.5, "sem historico tem que devolver a media da liga"
+    assert 6.0 < lam < 9.5, "com historico abaixo da liga, resultado tem que ficar entre os dois"
+    print("Auto-testes de mercados de contagem OK.")
 
 
 if __name__ == "__main__":
