@@ -58,7 +58,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from betting_model import (poisson_dixon_coles, gols_dixon_coles,
                            implied_lambdas, devig_power, devig_shin,
-                           InversaoFalhou)
+                           InversaoFalhou, poisson_total, ewma_shrinkage)
 import scan_odds
 
 # Cenarios de robustez: (rho, forma_dispersao). forma None = Poisson puro.
@@ -141,6 +141,100 @@ def mercados_derivados(lh, la, rho, forma=None):
         "Ambas marcam (BTTS)": d["btts"],
         "Ambas NAO marcam": 1 - d["btts"],
     }
+
+
+# GATE DE PRIORIDADE 1X2 vs DERIVADOS (v32, Fase 3)
+# --------------------------------------------------
+# A regra 8/9 sempre disse "nao competir no 1X2 quando ha mercado menos
+# eficiente melhor" - mas isso nunca foi um filtro de codigo, so um aviso
+# retrospectivo em ledger_stats.py (conta DEPOIS do fato, nao impede
+# recomendar 1X2). O achado concreto que motivou isto: nos ultimos dias
+# testados (ver docs/DAILY_METHODOLOGY.md v31, linha ~208-219) 50%+ das
+# linhas do ledger eram 1X2 - o proprio sistema documentou que estava
+# ignorando a propria regra.
+#
+# domina_1x2() transforma a regra em portao: roda ANTES de prometer 1X2
+# como o palpite do dia, comparando contra os candidatos derivados JA
+# calculados para o mesmo jogo (goals/BTTS de avalia_evento(); escanteios
+# de candidato_escanteios() quando houver historico de time disponivel -
+# cartoes e chutes NAO entram aqui, foram REJEITADOS no backtest real,
+# ver scripts/backtest_cartoes.py e scripts/backtest_chutes.py).
+VIES_MAX_ESCANTEIOS = 0.012  # pior vies documentado no backtest (Fase 1, ACEITO COM RESSALVA)
+
+
+def candidato_escanteios(historico_casa, historico_fora, media_liga,
+                         linhas=(8.5, 9.5, 10.5), alpha=3.0):
+    """Gera candidatos de escanteios no MESMO formato dos candidatos de
+    avalia_evento(), usando o modelo ACEITO COM RESSALVA na Fase 1
+    (scripts/backtest_escanteios.py, N=15137, Poisson puro, vies max 1.2%).
+
+    Exige o CHAMADOR ja ter o historico recente (jogos ANTERIORES ao de
+    hoje - nunca incluir o proprio jogo, mesma regra do walk-forward do
+    backtest) de escanteios dos dois times envolvidos. Esta funcao nao
+    busca dado nenhum, so calcula - buscar o historico (pesquisa por time,
+    mesma natureza do que ja e feito hoje para lambdas de gols) e
+    responsabilidade de quem chama.
+
+    A probabilidade reportada ja vem DESCONTADA do vies maximo documentado
+    (VIES_MAX_ESCANTEIOS) - a mesma filosofia de "sempre reportar o numero
+    mais defensavel" que os cenarios de gols usam com o pior cenario.
+    """
+    lam_casa = ewma_shrinkage(historico_casa, media_liga, alpha=alpha)
+    lam_fora = ewma_shrinkage(historico_fora, media_liga, alpha=alpha)
+    lam_total = (lam_casa + lam_fora) / 2.0
+    dist = poisson_total(lam_total, linhas=linhas)
+
+    candidatos = []
+    for linha in linhas:
+        for direcao, prob in (("Over", dist[f"over_{linha}"]), ("Under", dist[f"under_{linha}"])):
+            prob_conservadora = max(0.0, prob - VIES_MAX_ESCANTEIOS)
+            if prob_conservadora >= PISO_ALTA:
+                faixa = "Alta"
+            elif prob_conservadora >= PISO_MODERADA:
+                faixa = "Moderada"
+            else:
+                continue
+            candidatos.append({
+                "mercado": f"Escanteios {direcao} {linha}",
+                "prob_pior_cenario": prob_conservadora,
+                "prob_melhor_cenario": prob,
+                "amplitude": prob - prob_conservadora,
+                "faixa": faixa,
+                "odd_justa": 1.0 / prob_conservadora,
+                "lambdas": (lam_casa, lam_fora),
+                "ressalva": ("modelo ACEITO COM RESSALVA (Fase 1, vies max "
+                             f"{VIES_MAX_ESCANTEIOS:.1%} documentado) - probabilidade "
+                             "ja ajustada conservadoramente"),
+            })
+    candidatos.sort(key=lambda c: -c["prob_pior_cenario"])
+    return candidatos
+
+
+def domina_1x2(candidatos_derivados, prob_1x2, margem_dominancia=0.05):
+    """Ha um candidato derivado (mercado menos eficiente, regra 8) que
+    dominaria uma selecao de 1X2 com probabilidade propria 'prob_1x2' (a
+    probabilidade que sustenta o edge que se pretende recomendar como
+    Aposta de Valor)?
+
+    'candidatos_derivados': lista de dicts no formato de avalia_evento()/
+    candidato_escanteios() PARA O MESMO JOGO - tipicamente
+    avalia_evento(ev)[0] + candidato_escanteios(...) concatenados, quando
+    houver historico de escanteios disponivel.
+
+    margem_dominancia: 1X2 so cede lugar se o derivado for melhor por uma
+    folga clara (default 5pp) - nao trocar por uma diferenca de ruido.
+
+    Retorna (dominado: bool, melhor_candidato_ou_None). Uso pretendido: no
+    fluxo diario, ANTES de declarar um 1X2 como Aposta de Valor do dia,
+    chamar isto com os candidatos derivados do mesmo jogo. Se dominado,
+    reportar o derivado no lugar (ou junto) - nunca declarar o 1X2 sozinho
+    como se fosse a unica opcao vista.
+    """
+    melhores = [c for c in candidatos_derivados
+                if c["prob_pior_cenario"] >= prob_1x2 + margem_dominancia]
+    if not melhores:
+        return False, None
+    return True, max(melhores, key=lambda c: c["prob_pior_cenario"])
 
 
 def avalia_evento(ev, so_probabilidades=False):
@@ -411,6 +505,23 @@ def main():
             print(f"  {n:>4}  {m}")
     if args.demo:
         print(AVISO_CIRCULARIDADE)
+        print("\n=== DEMONSTRACAO DO GATE domina_1x2() (Fase 3, v32) ===")
+        alvo = next((r for r in resultados if r["candidatos"][0]["faixa"] == "Alta"), None)
+        if alvo:
+            prob_1x2_hipotetica = 0.60  # simula uma Aposta de Valor 1X2 com edge modesto
+            dominado, melhor = domina_1x2(alvo["candidatos"], prob_1x2_hipotetica)
+            print(f"Jogo: {alvo['jogo']} | hipotese: 1X2 com probabilidade propria "
+                  f"{prob_1x2_hipotetica:.0%}")
+            if dominado:
+                print(f"DOMINADO: candidato derivado '{melhor['mercado']}' "
+                      f"({melhor['prob_pior_cenario']:.1%}, faixa {melhor['faixa']}) supera "
+                      "o 1X2 hipotetico por folga clara - regra 8/9 diz para preferir o "
+                      "derivado, nao o 1X2, neste jogo.")
+            else:
+                print("NAO dominado: nenhum candidato derivado supera o 1X2 hipotetico "
+                      "por margem suficiente - 1X2 pode seguir como recomendacao.")
+        else:
+            print("Nenhum jogo do catalogo demo teve candidato Alta para demonstrar o gate.")
     print("\nLEMBRETE: isto e PROBABILIDADE ancorada no preco da casa, nao edge.")
     print("PE nunca usa stake. Para virar Aposta de Valor precisa passar pelo")
     print("teste 9.1 com odds dos DOIS lados da MESMA casa.")
