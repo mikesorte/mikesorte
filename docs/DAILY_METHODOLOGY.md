@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v29 (03/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v30 (03/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -745,6 +745,47 @@ e calibração podem rodar todo dia sem conector nenhum; catálogo do dia, não.
 simulação própria não é validação — é eco. Toda mudança de modelo agora
 exige passar por `backtest_real.py` antes de ir a produção.
 
+(43) v30 (03/08): **causa real da indisponibilidade — conectores DESLIGADOS
+NESTA CONVERSA, não ausentes da conta. Corrige a prescrição da decisão 39.**
+
+Mike informou que, do lado dele, os conectores aparecem ativos. Isso separou
+duas hipóteses que eu vinha tratando como uma só. `ListConnectors` deu o
+veredito:
+
+| Conector | connected | enabledInChat | ferramentas carregam |
+|---|---|---|---|
+| Canva, Gmail, Calendar, Drive, Kairogen | true | **true** | **sim** |
+| **Nimble, Tavily, Exa** | true | **false** | **não** |
+
+**Correlação perfeita, 10/10.** `enabledInChat` prevê exatamente a
+disponibilidade real.
+
+**Duas coisas que eu tinha errado:**
+
+1. **Decisão 39 concluiu "conector ausente por configuração da Routine".**
+   Isso explica os 0/7 em execução agendada, e segue válido para ELAS. Mas
+   eu estendi a conclusão aos turnos interativos, onde a causa é outra e
+   muito mais simples: os três estão **autenticados na conta e desligados
+   nesta conversa**. Não era oscilação, não era provedor fora do ar, não era
+   dispositivo.
+
+2. **Eu havia registrado que "`enabledInChat` diverge da disponibilidade
+   real" e mandado usar só `ToolSearch` como teste.** Hoje a correlação é
+   perfeita. A regra correta é usar **os dois**: `ListConnectors` diz *por
+   quê* (desligado no chat vs desconectado da conta), `ToolSearch` diz *se*
+   carrega. Descartar o `ListConnectors` me custou dias — era ele que tinha
+   a resposta.
+
+**Ação para o usuário (única coisa que destrava):** nas configurações de
+conectores **desta conversa** no claude.ai, ligar **Nimble, Tavily e Exa**.
+Não é a configuração de conta (lá já estão conectados) — é o botão por chat.
+
+**Lição de método, quarta ocorrência do mesmo padrão** (ver 36, 39, 42):
+descartei uma fonte de diagnóstico por uma conclusão antiga e não a revisitei.
+`ListConnectors` estava dando a resposta certa o tempo todo. **Quando um
+diagnóstico não fecha, reabrir as fontes descartadas antes de inventar
+mecanismo novo.**
+
 (30) v17-c (31/07): **bug de corrupção silenciosa do ledger, encontrado e
 corrigido.** As linhas de 30/07 e 31/07 tinham 18 e 19 campos num CSV de 17
 colunas — vírgula não escapada dentro do campo `casa` (ex.: `Superbet (odds
@@ -782,9 +823,12 @@ CONSOLIDADO; (B) PDF anexado; (C) resumo curto no chat (3-5 linhas).
 
 1. `git pull --rebase`; `python3 scripts/validate_system.py` (corrigir
    erros, anotar pendências).
-2. **Checagem de conectores + contexto (v26).** `ToolSearch` para os três
-   (Nimble, Exa, Tavily) — o flag `enabledInChat` diverge da disponibilidade
-   real, então o que vale é a ferramenta CARREGAR. Registrar SEMPRE:
+2. **Checagem de conectores + contexto (v26, corrigido em v30).** Usar
+   **`ListConnectors` E `ToolSearch`** — são complementares, não redundantes:
+   `ListConnectors` diz POR QUE (desligado no chat vs desconectado da conta),
+   `ToolSearch` diz SE carrega. Se `connected: true` e
+   `enabledInChat: false`, a correção é o usuário ligar o conector NESTA
+   CONVERSA (decisão 43). Registrar SEMPRE:
    `python3 scripts/connector_log.py --registrar nimble=X tavily=Y exa=Z contexto=trigger nota="..."`
    (usar `contexto=interativo` quando o usuário estiver presente).
 
