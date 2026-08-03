@@ -726,6 +726,21 @@ evidência de dado real**.
 **todos** os mercados, com respaldo publicado (Štrumbelj 2014: estimativas
 não-enviesadas na Premier League).
 
+**Mapa do allowlist de rede (medido em 03/08, não suposto).** Aplicando a
+própria regra acima, os hosts foram enumerados um a um:
+
+| Host | Estado |
+|---|---|
+| `raw.githubusercontent.com` | **200** — dado histórico com odds |
+| `api.github.com` | **200** (com limite de taxa) |
+| `files.pythonhosted.org` | **200** |
+| `pypi.org` | **200** |
+| `football-data.co.uk`, `api.the-odds-api.com`, `api.football-data.org`, `huggingface.co`, `gist.githubusercontent.com` | túnel recusado |
+
+**Consequência:** dado HISTÓRICO com odds é acessível sempre (via GitHub raw);
+odds AO VIVO continuam dependendo exclusivamente do Nimble. Ou seja: backtest
+e calibração podem rodar todo dia sem conector nenhum; catálogo do dia, não.
+
 **Lição de processo, mais importante que a correção:** validação contra
 simulação própria não é validação — é eco. Toda mudança de modelo agora
 exige passar por `backtest_real.py` antes de ir a produção.
