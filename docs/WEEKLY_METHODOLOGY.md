@@ -1,6 +1,6 @@
 # Metodologia da Revisão Semanal do Sistema de Apostas
 
-**Versão: alinhada ao DAILY_METHODOLOGY.md v16 (30/07/2026).** Esta é a
+**Versão: alinhada ao DAILY_METHODOLOGY.md v29 (03/08/2026).** Esta é a
 fonte da verdade da revisão semanal. A trigger agendada ("Revisão Semanal
 do Sistema de Apostas") só contém um prompt curto que manda ler este
 arquivo — mesma lógica do `docs/DAILY_METHODOLOGY.md` (ver a seção
