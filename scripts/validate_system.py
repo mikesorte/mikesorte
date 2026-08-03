@@ -392,6 +392,83 @@ def main():
     except Exception as e:
         err(f"test_extraction: nao foi possivel rodar a suite - {e}")
 
+    # 3i) regressao nos mercados de contagem + line-shopping (v32). Fase 1-4
+    # do plano de evolucao analitica: escanteios/cartoes/chutes e infra de
+    # cruzamento de casas. Cartoes e chutes foram REJEITADOS no backtest
+    # real (ver scripts/backtest_cartoes.py / backtest_chutes.py) - so
+    # escanteios (ACEITO COM RESSALVA) e as funcoes de infraestrutura sao
+    # testadas aqui como regressao de codigo, nao como prova de calibracao
+    # (isso e feito pelos scripts de backtest, que exigem o dataset baixado
+    # e nao rodam em toda execucao).
+    try:
+        from betting_model import poisson_total, negbin_total, poisson_grid, over_under_time, ewma_shrinkage
+        pt = poisson_total(9.8, linhas=(8.5, 9.5, 10.5))
+        assert abs(pt["over_9.5"] + pt["under_9.5"] - 1.0) < 1e-9, "poisson_total: over+under nao soma 1"
+        assert pt["over_8.5"] > pt["over_9.5"] > pt["over_10.5"], "poisson_total: over deveria cair com a linha"
+        assert sum(pt["distribuicao"].values()) > 0.999, "poisson_total: max_n=30 nao cobre massa suficiente em lambda=9.8"
+        nb = negbin_total(9.8, forma=8.0, linhas=(9.5,))
+        assert abs(nb["over_9.5"] + nb["under_9.5"] - 1.0) < 1e-9, "negbin_total: over+under nao soma 1"
+        assert negbin_total(9.8, forma=None, linhas=(9.5,))["over_9.5"] == pt["over_9.5"], \
+            "negbin_total(forma=None) deveria bater exatamente com poisson_total"
+        pg = poisson_grid(5.2, 4.6)
+        assert sum(pg["grid"].values()) > 0.999, "poisson_grid: max_n=15 nao cobre massa suficiente"
+        assert 0 < over_under_time(pg, "a", 5.5) < 1, "over_under_time fora de [0,1]"
+        assert ewma_shrinkage([], media_liga=9.5) == 9.5, "ewma_shrinkage sem historico deveria devolver a media da liga"
+        lam = ewma_shrinkage([6, 8, 5], media_liga=9.5, alpha=3.0)
+        assert 6.0 < lam < 9.5, "ewma_shrinkage com historico abaixo da liga deveria ficar entre os dois"
+    except AssertionError as e:
+        err(f"mercados de contagem: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"mercados de contagem: falha ao carregar/testar - {e}")
+
+    try:
+        from pe_engine import candidato_escanteios, domina_1x2
+        cands = candidato_escanteios([10, 8, 11, 9], [7, 6, 8, 5], media_liga=9.5)
+        assert all(0 <= c["prob_pior_cenario"] <= 1 for c in cands), \
+            "candidato_escanteios: probabilidade fora de [0,1]"
+        assert all(c["faixa"] in ("Alta", "Moderada") for c in cands), \
+            "candidato_escanteios: faixa fora do vocabulario esperado"
+        dominado, melhor = domina_1x2(
+            [{"mercado": "X", "prob_pior_cenario": 0.90}], prob_1x2=0.60)
+        assert dominado and melhor["mercado"] == "X", \
+            "domina_1x2: candidato claramente melhor deveria dominar"
+        dominado2, _ = domina_1x2(
+            [{"mercado": "X", "prob_pior_cenario": 0.61}], prob_1x2=0.60)
+        assert not dominado2, "domina_1x2: diferenca dentro da margem nao deveria dominar"
+    except AssertionError as e:
+        err(f"pe_engine (gate 1x2/escanteios): REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"pe_engine (gate 1x2/escanteios): falha ao carregar/testar - {e}")
+
+    try:
+        from casa_matcher import normaliza_time, cruza_fixtures, melhor_preco, casa_do_edge
+        assert normaliza_time("Celtic FC") == normaliza_time("Celtic"), \
+            "normaliza_time deveria remover sufixo generico de clube (FC)"
+        ev_a = {"participants": "Celtic FC - Dundee", "start_time": "1785000000000", "odds": [1.22, 7.40, 14.00]}
+        ev_b = {"participants": "Celtic - Dundee FC", "start_time": "1785000300000", "odds": [1.20, 7.00, 15.00]}
+        fixtures = cruza_fixtures({"Betano": [ev_a], "Bet365": [ev_b]})
+        assert len(fixtures) == 1, "cruza_fixtures deveria juntar o mesmo confronto de duas casas em 1 fixture"
+        assert set(fixtures[0]["por_casa"]) == {"Betano", "Bet365"}, "cruza_fixtures perdeu uma das casas"
+        casa, odd = melhor_preco(fixtures[0], 2)
+        assert (casa, odd) == ("Bet365", 15.0), f"melhor_preco: esperado (Bet365, 15.0), veio ({casa}, {odd})"
+        assert casa_do_edge(fixtures[0]) in ("Betano", "Bet365"), "casa_do_edge nao achou casa com 1X2 completo"
+    except AssertionError as e:
+        err(f"casa_matcher: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"casa_matcher: falha ao carregar/testar - {e}")
+
+    try:
+        from odds_sources import plano_multi_casa
+        plano = plano_multi_casa(3)
+        assert len(plano) <= 3, "plano_multi_casa devolveu mais entradas que o pedido"
+        casas_no_plano = [p["casa"] for p in plano]
+        assert len(casas_no_plano) == len(set(casas_no_plano)), \
+            "plano_multi_casa: mesma casa apareceu 2x (deveria ser 1 entrada por casa)"
+    except AssertionError as e:
+        err(f"odds_sources (multi-casa): REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"odds_sources (multi-casa): falha ao carregar/testar - {e}")
+
     # relatorio
     # O banner de rota (v17-d) foi REMOVIDO em 02/08: era uma muleta para o
     # periodo em que o servidor Claude_Code_Remote estava fora e as triggers
