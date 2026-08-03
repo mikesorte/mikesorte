@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v32 (03/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v33 (03/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -880,6 +880,76 @@ do pe_ledger, foi arquivado por "contagem exata nunca encontrada"); é um
 problema de infraestrutura de dado paralelo ao modelo, não resolvido
 aqui.
 
+(45) v33 (03/08, pedido do usuário): **motor de frequência EMPÍRICA
+(últimos N jogos) — o método manual do usuário formalizado — e
+combinadas com fórmula real.**
+
+Crítica do usuário, correta: o modelo da decisão 44/v32 calibra a FORMA
+Poisson contra uma base histórica genérica (2000-2013, 15.150 jogos de 5
+ligas europeias) mas nunca olha para os dois times específicos do jogo de
+hoje — "base de dados rasa". O processo manual que ele descreveu é mais
+direto: pegar os ÚLTIMOS N JOGOS REAIS de cada time, contar em quantos
+deles uma estatística passou de um limiar (ex.: "7 de 10 jogos com +8
+escanteios"), comparar essa TAXA EMPÍRICA contra a odd oferecida hoje
+para esse mesmo limiar — sem lambda, sem Poisson, contagem direta.
+
+**`scripts/forma_recente.py` (novo)** formaliza isso: `taxa_empirica()`
+faz a contagem; `avaliar_selecao()` compara contra a odd usando o LIMITE
+INFERIOR de Wilson (não a taxa bruta) como número defensável — mesma
+filosofia de "sempre o pior cenário" que o motor de PE já usa. Achado
+real testando com o próprio exemplo do usuário (8 de 10 jogos, limiar 8):
+taxa bruta 80%, mas Wilson inferior cai para 49% — mesmo 9 de 10 (90%
+bruto) só dá piso de ~59,6%, e a odd 1,65 do exemplo implica 60,6%. Ou
+seja: **o piso de Wilson com N=10 é bem mais rigoroso que ler a taxa bruta
+direto** — quase exige acerto perfeito (10/10) pra bater uma odd em torno
+de 1,6-1,7 com confiança de 95%. Isso é reportado explicitamente, não
+escondido: o sistema deve mostrar taxa bruta E limite inferior sempre,
+nunca só o número que favorece a recomendação.
+
+**Coleta:** não é um scraper fixo (formato de site muda, quebra
+silencioso) — continua sendo pesquisa ao vivo (WebSearch/Nimble/Tavily,
+cascata da regra 6.1: sofascore, whoscored, flashscore, fbref) durante o
+aprofundamento de cada jogo, transcrita para
+`data/dumps/YYYY-MM-DD-forma-{time-slug}.csv` (schema: data, adversário,
+mandante, chutes, chutes_gol, escanteios, cartões, faltas, posse,
+resultado — persistido e commitado, mesma disciplina da regra v26).
+Ajuste de nível do adversário ("mesmo nível ou nível inferior") fica como
+passo qualitativo (checar tabela/classificação), não um número inventado
+sem dado para calibrar.
+
+**H2H (item 2):** `taxa_confronto_direto()` reusa a mesma função sobre o
+histórico de confronto direto — N tipicamente pequeno, o que já cai
+automaticamente num Wilson mais largo (moderado, não alto), exatamente
+como o item 2 já prescrevia antes de ter função.
+
+**Combinadas (item 10) — fórmula real, substituindo o texto vago
+"imposto SGP":** `betting_model.prob_combinada()` (produto das
+probabilidades), `odd_combinada()` (produto das odds), `ev_combinada()`.
+Validado com dado real, não suposição: medi a correlação entre limiares
+de CATEGORIAS DIFERENTES nos 15.136-15.137 jogos do dataset de backtest
+(decisão 44):
+
+| Par de mercados | phi | P(ambos) real vs. independente |
+|---|---|---|
+| Over 2.5 gols × Over 9.5 escanteios | -0,004 | 27,4% vs 27,5% (razão 0,996) |
+| Over 2.5 gols × Over 3.5 cartões | +0,011 | 30,5% vs 30,3% (razão 1,009) |
+| Over 9.5 escanteios × Over 3.5 cartões | -0,010 | 34,1% vs 34,3% (razão 0,993) |
+
+Correlação desprezível nos três pares — tratar categorias diferentes
+(gols/escanteios/cartões/chutes) como independentes numa combinada é
+sustentado por dado real. **Isto NÃO vale para mercados MECANICAMENTE
+ligados** (ex.: Over 2.5 gols e Ambas Marcam vêm do MESMO placar) — nunca
+multiplicar como independentes, é erro de dupla contagem, não uma
+questão de correlação a descontar. Regra prática: as pernas de uma
+combinada têm que vir de categorias de estatística diferentes (gols vs.
+escanteios vs. cartões vs. chutes), nunca duas leituras do mesmo evento.
+
+**Fora de escopo, declarado (igual à decisão 44):** ainda não há scraper
+automático — a coleta de forma recente é pesquisa ao vivo por jogo
+aprofundado (2-4/dia), não em escala para o catálogo inteiro. Estatística
+de jogador individual cabe no mesmo processo de coleta quando a fonte
+trouxer, não tem pipeline próprio.
+
 ## Casas licenciadas (SPA/MF)
 
 Betano, Bet Nacional, Superbet, Bet365, Sportingbet, KTO, Novibet,
@@ -1019,7 +1089,8 @@ muitos; cobertura parcial declarada.
 1. Forma EWMA (lambda 0,85-0,90), xG primário (FBref/Understat/SofaScore/
    FotMob), proxy declarado; mínimo 3 jogos.
 1.1. Triangulação: xG/proxy + Elo + elenco + coeficientes.
-2. H2H 2-3 temporadas; N=3 consistente = Wilson moderado, não alto.
+2. H2H 2-3 temporadas; N=3 consistente = Wilson moderado, não alto —
+   desde v33 via `forma_recente.taxa_confronto_direto()`.
 3. Mando/altitude/clima.
 4. GOLS primeira linha: lambdas → `poisson_dixon_coles()` (calcular, não
    estimar). Toda a família over/under/faixas/totais/BTTS.
@@ -1035,7 +1106,12 @@ muitos; cobertura parcial declarada.
      composto — **IMPLEMENTADO v32**: `betting_model.poisson_total()` +
      `pe_engine.candidato_escanteios()`, testado contra 15.137 jogos reais
      (2000-2013, 5 ligas), ACEITO COM RESSALVA (viés máx. 1,2%, declarar
-     sempre que usado — ver decisão 44); (b) cartões/faltas aditivo +
+     sempre que usado — ver decisão 44). **v33: método PRIMÁRIO para
+     mercados de limiar passa a ser a frequência EMPÍRICA dos últimos N
+     jogos REAIS de cada time** (`forma_recente.taxa_empirica()` — ver
+     decisão 45), que reflete o time de hoje, não uma base genérica; o
+     Poisson vira cross-check secundário quando a amostra recente for
+     muito fina (poucos jogos disponíveis); (b) cartões/faltas aditivo +
      árbitro — testado v32 (`backtest_cartoes.py`, N=15.148), **REJEITADO**
      (viés residual não resolvido por 3 hipóteses testadas; sem dado de
      árbitro disponível); b2) faltas por jogador — sem dado, não tentado;
@@ -1077,8 +1153,13 @@ muitos; cobertura parcial declarada.
      PE que dificilmente viraria aposta de valor (registro vale para
      calibração).
 10. Combinadas: odd FINAL ≥1,40; cada perna no 9.1; correlação declarada
-    sem par negativo; prob conjunta real; até ~4,0; imposto SGP. PE nunca
-    combina.
+    sem par negativo; prob conjunta real via `betting_model.prob_combinada()`
+    /`odd_combinada()`/`ev_combinada()` (v33, decisão 45 — substituiu o
+    "imposto SGP" textual por fórmula validada com dado real: categorias
+    diferentes ≈ independentes, phi entre -0,010 e +0,011 medido em
+    15.136+ jogos reais); até ~4,0; nunca combinar pernas MECANICAMENTE
+    ligadas (mesmo placar/mesmo evento — dupla contagem, não correlação).
+    PE nunca combina.
 13. Relatório: quadro-resumo consolidado primeiro; por jogo forma/
     triangulação/contexto/H2H/notícias/cobertura/odds/valor/PEs; nota
     técnica se conectores indisponíveis. 13.1 nunca prometer dia positivo.
