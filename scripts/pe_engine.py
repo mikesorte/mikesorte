@@ -455,6 +455,8 @@ def main():
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--max-por-jogo", type=int, default=2,
                     help="quantos mercados reportar por jogo (padrao 2)")
+    ap.add_argument("--casa", default=None,
+                    help="nome da casa de origem do dump (v32, p/ line-shopping)")
     args = ap.parse_args()
 
     if args.demo:
@@ -462,7 +464,7 @@ def main():
     elif args.dump_file:
         with open(args.dump_file, encoding="utf-8") as f:
             data = json.load(f)
-        eventos = scan_odds.parse_mres_blocks(data["content"])
+        eventos = scan_odds.parse_mres_blocks(data["content"], casa=args.casa)
         eventos, motivos = scan_odds.filtrar_elegiveis(eventos)
         print(f"catalogo: {len(eventos)} elegiveis apos filtros {motivos}\n")
     else:

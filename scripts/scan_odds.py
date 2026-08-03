@@ -78,7 +78,13 @@ def extract_json_obj(content, start):
     return None
 
 
-def parse_mres_blocks(content):
+def parse_mres_blocks(content, casa=None):
+    """casa (v32, Fase 4): nome da casa de onde este dump veio (ex.
+    "Betano"). Opcional (default None, mantem compatibilidade com
+    chamadores existentes que nao sabem/nao precisam da casa) - mas
+    OBRIGATORIO para casa_matcher.py conseguir cruzar fixtures entre dumps
+    de casas diferentes (line-shopping real, ver docs/DAILY_METHODOLOGY.md
+    v32 regra 9)."""
     events = []
     for idx in find_all(content, '"name":"Resultado Final"'):
         # o objeto do mercado comeca no '{' mais proximo antes de idx
@@ -109,6 +115,7 @@ def parse_mres_blocks(content):
             "competition": league_m[-1] if league_m else None,
             "participants": evname_m[-1] if evname_m else None,
             "start_time": time_m[-1] if time_m else None,
+            "casa": casa,
         })
     return events
 
@@ -215,6 +222,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("dump_file")
     ap.add_argument("--liga-menor-kw", default=None)
+    ap.add_argument("--casa", default=None,
+                    help="nome da casa de origem do dump (v32, p/ line-shopping)")
     args = ap.parse_args()
 
     with open(args.dump_file, encoding="utf-8") as f:
@@ -229,8 +238,9 @@ def main():
     sys.path.insert(0, "scripts")
     from betting_model import devig_power
 
-    events = parse_mres_blocks(content)
-    print(f"=== VARREDURA AMPLA: {len(events)} evento(s) com 1X2 encontrado(s) no dump ===\n")
+    events = parse_mres_blocks(content, casa=args.casa)
+    print(f"=== VARREDURA AMPLA: {len(events)} evento(s) com 1X2 encontrado(s) no dump "
+          f"({args.casa or 'casa nao informada'}) ===\n")
     for e in events:
         try:
             fair = devig_power(e["odds"])

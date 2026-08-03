@@ -160,7 +160,11 @@ def plano_de_tentativa():
     rk = {(c, f): (taxa, ok, tot) for taxa, ok, tot, c, f in ranking()}
     plano = []
     for casa in CASAS:
-        for ferr in ("nimble_extract_async", "tavily_extract", "exa_web_fetch"):
+        # v32: "nimble_extract" (sincrono) faltava aqui - e a combinacao
+        # PROVADA (Betano, driver=vx10, "BREAKTHROUGH" de 01/08 no log de
+        # extracao). Sem ela, a unica combinacao com sucesso real do
+        # sistema nunca aparecia no plano, perdendo pra "nunca testado".
+        for ferr in ("nimble_extract", "nimble_extract_async", "tavily_extract", "exa_web_fetch"):
             hist = rk.get((casa["nome"], ferr))
             if hist is None:
                 # nunca testado fica ACIMA do que ja falhou: pode funcionar,
@@ -184,9 +188,33 @@ def plano_de_tentativa():
     return sorted(plano, key=lambda p: -p["prioridade"])
 
 
+def plano_multi_casa(n_casas=3):
+    """v32, Fase 4: as N casas mais promissoras do dia, uma entrada por
+    casa (a ferramenta de maior prioridade dela), em vez do plano achatado
+    de plano_de_tentativa() que mistura casa x ferramenta.
+
+    POR QUE (regra 9, "line-shopping sempre"): ate v31 o fluxo tentava o
+    topo do plano achatado e PARAVA na primeira que funcionava (decisao
+    v23, "Betano basta") - nunca sobrava tentativa pra comparar preco
+    entre casas no mesmo jogo. Isto devolve N casas distintas para o
+    fluxo diario tentar (nao so 1), habilitando casa_matcher.cruza_fixtures()
+    de verdade. Continua best-effort: se so 1 casa responder, o fluxo
+    segue com 1 (line-shopping nao pode ser requisito rigido que quebra o
+    sistema quando as outras estao fora do ar).
+    """
+    achatado = plano_de_tentativa()
+    por_casa = {}
+    for p in achatado:
+        if p["casa"] not in por_casa or p["prioridade"] > por_casa[p["casa"]]["prioridade"]:
+            por_casa[p["casa"]] = p
+    return sorted(por_casa.values(), key=lambda p: -p["prioridade"])[:n_casas]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--plano", action="store_true")
+    ap.add_argument("--plano-multi", type=int, nargs="?", const=3, default=None,
+                    metavar="N", help="top N casas distintas p/ line-shopping (v32, default 3)")
     ap.add_argument("--ranking", action="store_true")
     ap.add_argument("--registrar", nargs="*", metavar="chave=valor")
     args = ap.parse_args()
@@ -206,6 +234,15 @@ def main():
             print("execucao diaria - e assim que o sistema aprende qual casa serve.")
         for taxa, ok, tot, casa, ferr in rk:
             print(f"  {taxa:5.0%}  ({ok}/{tot})  {casa:14s} via {ferr}")
+        return 0
+
+    if args.plano_multi is not None:
+        n = args.plano_multi
+        print(f"=== PLANO MULTI-CASA (top {n}, v32 - p/ line-shopping) ===")
+        print("(1 entrada por casa distinta; nunca para na primeira que funciona)\n")
+        for p in plano_multi_casa(n):
+            marca = " [precisa nimble_search p/ achar a URL]" if p["precisa_descobrir_url"] else ""
+            print(f"  {p['casa']:14s} via {p['ferramenta']:20s} [{p['historico']}]{marca}")
         return 0
 
     if args.plano:
