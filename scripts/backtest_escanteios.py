@@ -74,18 +74,25 @@ def _parse_data(s):
     raise ValueError(f"data nao reconhecida: {s!r}")
 
 
-def carrega_jogos_com_stats():
-    """Le todos os CSVs com HC/AC, ordena por data explicita. Devolve lista
-    de dicts: liga, data, casa, fora, hc, ac, total."""
+def carrega_jogos_com_stats(colunas_casa=("HC",), colunas_fora=("AC",)):
+    """Le todos os CSVs que tenham as colunas pedidas, ordena por data
+    explicita. Generico o bastante pra reuso por escanteios (HC/AC),
+    cartoes (HY,HR / AY,AR) e chutes-a-gol (HST/AST) - ver
+    scripts/backtest_cartoes.py e scripts/backtest_chutes.py.
+
+    Devolve lista de dicts: liga, data, casa, fora, total (soma das
+    colunas_casa do mandante + colunas_fora do visitante)."""
     jogos = []
+    todas_colunas = list(colunas_casa) + list(colunas_fora)
     for caminho in sorted(glob.glob(os.path.join(DADOS, "*.csv"))):
         liga = os.path.basename(caminho).split("_s")[0].replace(".csv", "")
         with open(caminho, encoding="utf-8", errors="replace") as f:
             for r in csv.DictReader(f):
                 try:
-                    if not r.get("HC") or not r.get("AC"):
+                    if any(not r.get(c) for c in todas_colunas):
                         continue
-                    hc, ac = int(r["HC"]), int(r["AC"])
+                    v_casa = sum(int(r[c]) for c in colunas_casa)
+                    v_fora = sum(int(r[c]) for c in colunas_fora)
                     data = _parse_data(r["Date"])
                     casa, fora = r["HomeTeam"], r["AwayTeam"]
                 except (KeyError, ValueError, TypeError):
@@ -93,15 +100,19 @@ def carrega_jogos_com_stats():
                 if not casa or not fora:
                     continue
                 jogos.append({"liga": liga, "data": data, "casa": casa,
-                              "fora": fora, "hc": hc, "ac": ac, "total": hc + ac})
+                              "fora": fora, "total": v_casa + v_fora,
+                              "valor_casa": v_casa, "valor_fora": v_fora})
     jogos.sort(key=lambda j: j["data"])
     return jogos
 
 
-def walk_forward_lambdas(jogos, alpha=ALPHA_SHRINKAGE, forma=None):
+def walk_forward_lambdas(jogos, alpha=ALPHA_SHRINKAGE, forma=None, linhas=None):
     """Gera (jogo, previsao) por jogo, SEM vazamento (ver docstring do
     modulo). forma=None usa Poisson puro; numero usa negbin_total (v32,
-    so entra se o backtest validar melhora real - ver main())."""
+    so entra se o backtest validar melhora real - ver main()). linhas=None
+    usa o default do modulo (escanteios) - outros mercados (cartoes,
+    chutes) passam suas proprias linhas."""
+    linhas = linhas if linhas is not None else LINHAS
     historico_time = defaultdict(list)   # (liga, time) -> [totais anteriores]
     liga_expandida = defaultdict(list)   # liga -> [totais anteriores na liga]
 
@@ -117,7 +128,7 @@ def walk_forward_lambdas(jogos, alpha=ALPHA_SHRINKAGE, forma=None):
         lam_fora = ewma_shrinkage(hist_fora, media_liga, alpha=alpha)
         lam_total = (lam_casa + lam_fora) / 2.0
 
-        previsao = negbin_total(lam_total, forma, linhas=LINHAS)
+        previsao = negbin_total(lam_total, forma, linhas=linhas)
         saida.append((jogo, previsao))
 
         # SO AGORA atualiza o estado - depois de ja ter gerado a previsao
@@ -145,11 +156,12 @@ def calibracao(pares_por_mercado):
     return out
 
 
-def oraculo_lambdas(jogos, alpha=ALPHA_SHRINKAGE):
+def oraculo_lambdas(jogos, alpha=ALPHA_SHRINKAGE, linhas=None):
     """Versao DELIBERADAMENTE trapaceira: usa a media da temporada/liga
     inteira (passado E futuro) como lambda de cada time, em vez de so o
     historico anterior. Serve unicamente de teto de referencia para o
     teste de sanidade - nunca usar isto como previsao de verdade."""
+    linhas = linhas if linhas is not None else LINHAS
     totais_por_time = defaultdict(list)
     totais_por_liga = defaultdict(list)
     for jogo in jogos:
@@ -169,16 +181,49 @@ def oraculo_lambdas(jogos, alpha=ALPHA_SHRINKAGE):
         lam_casa = (alpha * media_liga + n_casa * medias_time[(liga, casa)]) / (alpha + n_casa)
         lam_fora = (alpha * media_liga + n_fora * medias_time[(liga, fora)]) / (alpha + n_fora)
         lam_total = (lam_casa + lam_fora) / 2.0
-        saida.append((jogo, poisson_total(lam_total, linhas=LINHAS)))
+        saida.append((jogo, poisson_total(lam_total, linhas=linhas)))
     return saida
 
 
-def avalia(previsoes):
+def teste_embaralhamento(jogos, alpha=ALPHA_SHRINKAGE, forma=None, linhas=None, seed=42):
+    """Teste de sanidade SECUNDARIO (v32) - so precisa rodar quando o
+    canario do oraculo (ver oraculo_lambdas) "falha", isto e, quando o
+    walk-forward honesto bate o oraculo em Brier.
+
+    POR QUE ISSO PODE ACONTECER SEM SER VAZAMENTO: o oraculo usa media
+    CHEIA da temporada (sem peso por recencia), enquanto o walk-forward
+    honesto usa EWMA (pesa jogos recentes mais). Se o mercado tiver
+    tendencia real de curto prazo (forma recente do time muda ao longo da
+    temporada), o EWMA pode genuinamente capturar mais sinal que uma media
+    plana - mesmo sem nunca olhar o futuro. Ou seja, o oraculo NAO E um
+    teto matematico garantido (nao domina estritamente o walk-forward),
+    entao "honesto bate oraculo" nao e prova automatica de bug.
+
+    O teste decisivo: embaralhar a ordem dos jogos (destroi qualquer
+    estrutura temporal real, mas mantem o pipeline predict-antes-de-
+    atualizar identico). Se a vantagem do walk-forward sobre o oraculo
+    SOME (ou inverte) quando embaralhado, a vantagem original era sinal
+    real de recencia, nao vazamento - um pipeline com vazamento continuaria
+    "ganhando" mesmo com a ordem embaralhada, porque o vazamento nao
+    depende de ordem cronologica real."""
+    import random
+    linhas = linhas if linhas is not None else LINHAS
+    embaralhados = jogos[:]
+    random.Random(seed).shuffle(embaralhados)
+    prev_honesto = walk_forward_lambdas(embaralhados, alpha=alpha, forma=forma, linhas=linhas)
+    prev_oraculo = oraculo_lambdas(embaralhados, alpha=alpha, linhas=linhas)
+    b_honesto = brier([p for m in avalia(prev_honesto, linhas=linhas).values() for p in m])
+    b_oraculo = brier([p for m in avalia(prev_oraculo, linhas=linhas).values() for p in m])
+    return b_honesto, b_oraculo
+
+
+def avalia(previsoes, linhas=None):
     """previsoes: [(jogo, previsao), ...] -> {mercado: [(prob, ocorreu)]}"""
+    linhas = linhas if linhas is not None else LINHAS
     out = defaultdict(list)
     for jogo, previsao in previsoes:
         total_real = jogo["total"]
-        for linha in LINHAS:
+        for linha in linhas:
             chave = f"over_{linha}"
             out[chave].append((previsao[chave], total_real > linha))
     return out
@@ -238,10 +283,19 @@ def main():
     print(f"Brier walk-forward honesto ({melhor_nome}): {brier_melhor:.5f}")
     print(f"Brier oraculo (ve o futuro):              {brier_oraculo:.5f}")
     if brier_melhor <= brier_oraculo:
-        print("ALERTA: o walk-forward honesto empatou ou bateu o oraculo que ve o "
-              "futuro - isso e IMPOSSIVEL sem bug/vazamento no pipeline. NAO aceitar "
-              "este modelo sem investigar.")
-        veredito_sanidade = False
+        print("Walk-forward honesto bateu o oraculo em Brier - nao e prova automatica de "
+              "bug (oraculo usa media plana, sem peso por recencia; ver docstring de "
+              "teste_embaralhamento). Rodando teste decisivo: embaralhar a ordem dos jogos.")
+        b_honesto_emb, b_oraculo_emb = teste_embaralhamento(jogos, forma=CONFIGS[melhor_nome])
+        print(f"  embaralhado: honesto={b_honesto_emb:.5f} oraculo={b_oraculo_emb:.5f}")
+        if b_honesto_emb <= b_oraculo_emb:
+            print("ALERTA: a vantagem PERSISTE mesmo embaralhado - sinal de vazamento "
+                  "(nao depende de ordem cronologica real). NAO aceitar sem investigar.")
+            veredito_sanidade = False
+        else:
+            print("OK: a vantagem SOME quando embaralhado - confirma sinal real de "
+                  "recencia via EWMA, nao vazamento.")
+            veredito_sanidade = True
     else:
         print(f"OK: oraculo (que trapaceia vendo o futuro) tem Brier "
               f"{(brier_melhor - brier_oraculo) / brier_melhor:.1%} melhor que o "
