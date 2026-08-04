@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v34 (03/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v35 (04/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -971,6 +971,64 @@ times menores — julgamento qualitativo do analista, não calculado
 sozinho por falta de dado pra calibrar isso automaticamente); sem marcar
 dominância, ou sem nenhum dos dois, o veredito é "dado insuficiente" —
 nunca finge ter analisado os dois lados quando só teve um.
+
+(47) v35 (04/08, pedido do usuário): **Agent Reach instalado como canal de
+último recurso UNIVERSAL — para qualquer busca/página que falhar pelos
+métodos normais, em qualquer parte do fluxo diário, não só odds.**
+
+Pedido do usuário: ver instalado e usado o projeto de terceiros
+`github.com/Panniantong/agent-reach` para "poder enxergar as paginas das
+casas de apostas, busca de estatisticas, busca de analises, busca de
+qualquer página de internet bloqueada", como método a mais para odds e
+pesquisa em geral, entrando sempre que a ferramenta comum (Nimble/Tavily/
+Exa MCP/WebSearch) falhar ou uma página estiver bloqueada — em qualquer
+tarefa do fluxo (odds, forma recente, notícias, H2H), não só numa cascata
+específica.
+
+Instalação/auditoria: pacote "agent-reach" do PyPI é de OUTRO autor sem
+relação — nunca instalar por nome (`pip install agent-reach`); usado
+`git clone` do código-fonte real (`github.com/Panniantong/agent-reach`,
+`codeload`/zip bloqueados pelo proxy da sessão, `git clone` HTTPS direto
+funciona). Lido manualmente `pyproject.toml`, `SECURITY.md` e o mecanismo
+real de leitura de página (`agent_reach/channels/web.py`) antes de rodar
+qualquer coisa — sem `eval`/`exec`/exfiltração, só chamadas de instalador
+legítimas. Escopo instalado: só a infraestrutura base (gh CLI, mcporter +
+Exa, leitura de página via Jina Reader). **Não configurado**: cookies de
+Twitter/Xueqiu/Xiaohongshu nem API key da Groq — sem relação com odds/
+estatísticas/apostas, e extração de cookie de navegador não funciona
+neste ambiente headless de qualquer forma.
+
+Mecanismo real (o pacote não tem CLI de "fetch" dedicado, só
+setup/install/doctor — a leitura/busca é feita chamando os backends
+direto): `curl https://r.jina.ai/<url>` pra ler página; `mcporter call
+'exa.web_search_exa(...)'` pra buscar. Encapsulado em
+`scripts/agent_reach_fallback.py` (`disponivel()`, `le_pagina()`,
+`busca()`) — módulo puro stdlib (`shutil`/`subprocess`/`urllib`), não
+depende do venv de instalação nem do pacote Python importado, só do
+binário `mcporter` no PATH; testado com `env -i PATH=/usr/bin:/bin`
+(ambiente igual ao de uma Routine agendada sem Agent Reach) e continua
+funcionando sem erro — `disponivel()` retorna `False`, nada quebra.
+
+**Resultado real do teste (não suposição)**: `le_pagina()` bypassa
+bloqueio LEVE de bot/anti-scraping (whoscored.com deu 403 direto, passou
+via Jina) mas NÃO bypassa geo-block DURO de casa de apostas (Sportingbet
+— o próprio servidor do Jina bate no mesmo bloqueio geográfico) nem
+funciona quando o Jina anônimo está com reputação de IP ruim
+(football-data.co.uk devolveu erro de autenticação do próprio Jina, não
+do alvo) — tratar sempre como "vale tentar", nunca como garantia de
+acesso. `busca()` via Exa/mcporter funcionou bem nos dois testes (achou
+dado real de forma recente — últimos 10 jogos, escanteios/chutes por
+partida — para times de teste).
+
+Uso: registrado em `odds_sources.FERRAMENTAS` só para fins de auditoria/
+documentação (não participa do ranking normal de
+`plano_de_tentativa()`/`plano_multi_casa()`, que ordena CASA x
+ferramenta — Agent Reach não é uma casa, é um canal universal). Import
+direto (`from agent_reach_fallback import ...`) de qualquer script/turno
+sempre que o método normal falhar numa URL/busca específica — nunca
+substitui o método que já funciona. `validate_system.py` (seção 3k)
+testa só a lógica pura (sem rede) e trata ausência do módulo/mcporter
+como resultado normal, nunca erro bloqueante.
 
 ## Casas licenciadas (SPA/MF)
 

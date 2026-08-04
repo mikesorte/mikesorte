@@ -545,6 +545,25 @@ def main():
     except Exception as e:
         err(f"forma_recente: falha ao carregar/testar - {e}")
 
+    # 3k) agent_reach_fallback (v35) - checagem BEST-EFFORT, NUNCA bloqueante.
+    # A Routine agendada pode rodar num ambiente sem Agent Reach instalado -
+    # o sistema tem que continuar funcionando sem ele (mesmo principio dos
+    # conectores MCP em sessao agendada). So testa a logica PURA (sem rede);
+    # disponivel()==False e um resultado normal, nao um erro.
+    try:
+        from agent_reach_fallback import disponivel, _e_erro_autenticacao_jina
+        assert isinstance(disponivel(), bool), "disponivel() deveria devolver bool sempre"
+        assert _e_erro_autenticacao_jina('{"data":null,"code":401,"name":"AuthenticationRequiredError"}'), \
+            "deveria reconhecer o erro de autenticacao do Jina anonimo"
+        assert not _e_erro_autenticacao_jina("Title: pagina normal\n\nConteudo real aqui"), \
+            "nao deveria marcar conteudo normal como erro de autenticacao"
+    except AssertionError as e:
+        err(f"agent_reach_fallback: REGRESSAO DETECTADA - {e}")
+    except ImportError:
+        pass  # modulo/venv nao presente neste ambiente - esperado em sessao agendada, nao e erro
+    except Exception as e:
+        err(f"agent_reach_fallback: falha ao testar - {e}")
+
     # relatorio
     # O banner de rota (v17-d) foi REMOVIDO em 02/08: era uma muleta para o
     # periodo em que o servidor Claude_Code_Remote estava fora e as triggers

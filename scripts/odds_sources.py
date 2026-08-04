@@ -112,7 +112,25 @@ FERRAMENTAS = [
          medido="devolve so a casca; nao renderiza JS"),
     dict(nome="pdf_export", serve_para="ultimo recurso, exige acao do usuario",
          medido="funciona (31 jogos extraidos do export de 29/07)"),
+    dict(nome="agent_reach", serve_para=("ULTIMO RECURSO UNIVERSAL (v35) - so entra depois que "
+                                          "Nimble/Tavily/Exa MCP/WebSearch falharem numa URL/busca "
+                                          "especifica, para QUALQUER tarefa do fluxo (odds, forma "
+                                          "recente de time, noticias), nao so odds. Nunca substitui "
+                                          "o metodo normal quando ele funciona - ver "
+                                          "scripts/agent_reach_fallback.py."),
+         medido=("testado v35: le_pagina() funciona p/ bloqueio LEVE de bot (whoscored 403 direto, "
+                  "OK via Jina); NAO funciona p/ geo-block DURO de casa de apostas (Sportingbet - o "
+                  "proprio Jina bate no mesmo bloqueio) nem quando o Jina anonimo esta com "
+                  "reputacao de IP ruim (football-data.co.uk). busca() funciona bem (achou dado "
+                  "real de ultimos 10 jogos de 2 times de teste via Exa/mcporter).")),
 ]
+
+# v35: agent_reach e universal (nao e uma casa de apostas), entao NAO participa do
+# ranking normal de plano_de_tentativa()/plano_multi_casa() (que ordena por casa x
+# ferramenta pra decidir qual CASA tentar primeiro) - ele e um canal chamado
+# diretamente (scripts/agent_reach_fallback.le_pagina/busca) quando qualquer
+# outro metodo falhar, em qualquer parte do fluxo. Mantido aqui so como registro
+# do que foi medido sobre ele, para efeito de auditoria/decisao (regra v8).
 
 
 def _garantir_log():
