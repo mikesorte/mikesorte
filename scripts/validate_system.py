@@ -564,6 +564,90 @@ def main():
     except Exception as e:
         err(f"agent_reach_fallback: falha ao testar - {e}")
 
+    # 3l) scan_odds multi-mercado (v36). Causa raiz encontrada: o parser so
+    # extraia "Resultado Final" (1X2) e IGNORAVA outros 5 mercados que ja
+    # estavam no MESMO dump (Total de Gols/1oT/Chance Dupla/DNB/BTTS), alem
+    # de nunca ter tentado a pagina individual do evento onde Escanteios e
+    # Total de Cartoes tambem tem odds reais. Regressao roda com dado
+    # SINTETICO (rapido, sem depender de fixture externo) + confirma contra
+    # os dumps REAIS ja commitados quando presentes (best-effort, nao
+    # bloqueante - o fixture pode nao existir num clone raso/CI).
+    try:
+        from scan_odds import (parse_market_blocks, parse_todos_mercados,
+                                parse_mercados_evento, parse_todos_mercados_evento,
+                                MERCADOS, MERCADOS_EVENTO)
+
+        sint_listagem = (
+            '{"data":{"event":{"leagueName":"Liga Teste","name":"Time A - Time B","startTime":1785364200000,'
+            '"markets":['
+            '{"id":"1","name":"Resultado Final","type":"MRES","selections":['
+            '{"id":"1","name":"1","price":2.0},{"id":"2","name":"X","price":3.4},{"id":"3","name":"2","price":4.0}]},'
+            '{"id":"2","name":"Total de Gols","type":"HCTG","handicap":2.5,"selections":['
+            '{"id":"4","name":"Mais de 2.5","price":1.9},{"id":"5","name":"Menos de 2.5","price":1.9}]},'
+            '{"id":"3","name":"Ambas equipes Marcam","type":"BTSC","selections":['
+            '{"id":"6","name":"Sim","price":1.8},{"id":"7","name":"Não","price":1.95}]}'
+            ']}}}'
+        )
+        gols = parse_market_blocks(sint_listagem, MERCADOS["total_gols"])
+        assert len(gols) == 1, f"total_gols sintetico deveria achar 1 bloco, achou {len(gols)}"
+        assert gols[0]["odds"] == [1.9, 1.9], f"odds de total_gols erradas: {gols[0]['odds']}"
+        todos_sint = parse_todos_mercados(sint_listagem)
+        assert len(todos_sint["1x2"]) == 1 and len(todos_sint["total_gols"]) == 1 and len(todos_sint["btts"]) == 1, \
+            "parse_todos_mercados nao achou os 3 mercados sinteticos presentes"
+        assert todos_sint["dupla_chance"] == [] and todos_sint["dnb"] == [], \
+            "parse_todos_mercados nao deveria inventar mercado ausente"
+
+        sint_evento = (
+            '{"data":{"event":{"leagueName":"Liga Teste","name":"Time A - Time B","startTime":1785364200000}},'
+            '"markets":[{"id":"9","name":"Escanteios","type":"CNOU","selections":['
+            '{"id":"10","name":"Mais de 8.5","price":1.65},{"id":"11","name":"Menos de 8.5","price":2.15},'
+            '{"id":"12","name":"Mais de 9.5","price":2.07},{"id":"13","name":"Menos de 9.5","price":1.7}]}]}'
+        )
+        esc = parse_mercados_evento(sint_evento, MERCADOS_EVENTO["escanteios"])
+        assert esc is not None, "parse_mercados_evento nao achou escanteios sinteticos"
+        assert [l["handicap"] for l in esc["linhas"]] == [8.5, 9.5], f"linhas de escanteios erradas: {esc['linhas']}"
+        assert esc["linhas"][0]["odd_mais"] == 1.65 and esc["linhas"][0]["odd_menos"] == 2.15, \
+            f"odds da linha 8.5 erradas: {esc['linhas'][0]}"
+        cart = parse_mercados_evento(sint_evento, MERCADOS_EVENTO["cartoes"])
+        assert cart is None, "parse_mercados_evento nao deveria inventar mercado ausente (cartoes)"
+
+        # contra dado REAL ja commitado (best-effort - fixture pode faltar
+        # num clone raso; nao e erro bloqueante se faltar, so pula). `os` ja
+        # importado no topo do modulo - reimportar aqui localmente causaria
+        # UnboundLocalError (Python trata 'os' como local na funcao inteira).
+        import json
+        dump_listagem = os.path.join("data", "dumps", "2026-08-04-betano.json")
+        if os.path.exists(dump_listagem):
+            with open(dump_listagem, encoding="utf-8") as f:
+                real = json.load(f)["content"]
+            todos_real = parse_todos_mercados(real, casa="Betano")
+            assert len(todos_real["1x2"]) == 182, f"1x2 real esperado 182, achou {len(todos_real['1x2'])}"
+            for chave, n_esperado in (("total_gols", 191), ("total_gols_1t", 191),
+                                       ("dupla_chance", 187), ("dnb", 186), ("btts", 61)):
+                n = len(todos_real[chave])
+                assert n == n_esperado, f"{chave} real esperado {n_esperado}, achou {n}"
+
+        dump_evento = os.path.join("data", "dumps", "eventos", "2026-08-04-betano-boca-estudiantes.json")
+        if os.path.exists(dump_evento):
+            with open(dump_evento, encoding="utf-8") as f:
+                real_ev = json.load(f)["content"]
+            mercados_ev = parse_todos_mercados_evento(real_ev, casa="Betano")
+            assert mercados_ev["escanteios"] is not None and len(mercados_ev["escanteios"]["linhas"]) == 13, \
+                "escanteios reais (Boca x Estudiantes) deveriam ter 13 linhas"
+            assert mercados_ev["cartoes"] is not None and len(mercados_ev["cartoes"]["linhas"]) == 1, \
+                "cartoes reais (Boca x Estudiantes) deveriam ter 1 linha"
+
+        # parse_mres_blocks (compatibilidade, pe_engine.py depende dele) segue
+        # identico ao comportamento anterior
+        from scan_odds import parse_mres_blocks
+        evs = parse_mres_blocks(sint_listagem)
+        assert len(evs) == 1 and evs[0]["odds"] == [2.0, 3.4, 4.0], \
+            "parse_mres_blocks (compatibilidade) quebrou apos generalizacao do parser"
+    except AssertionError as e:
+        err(f"scan_odds multi-mercado: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"scan_odds multi-mercado: falha ao testar - {e}")
+
     # relatorio
     # O banner de rota (v17-d) foi REMOVIDO em 02/08: era uma muleta para o
     # periodo em que o servidor Claude_Code_Remote estava fora e as triggers

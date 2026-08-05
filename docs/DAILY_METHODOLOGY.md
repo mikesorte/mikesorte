@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v35 (04/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v36 (04/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -1030,6 +1030,91 @@ substitui o método que já funciona. `validate_system.py` (seção 3k)
 testa só a lógica pura (sem rede) e trata ausência do módulo/mcporter
 como resultado normal, nunca erro bloqueante.
 
+(48) v36 (04/08, pedido do usuário): **causa raiz de "zero palpites com
+dezenas de jogos achados" — o parser só extraía 1X2, e o motor de
+mercados de limiar (construído desde v32-v34) nunca foi ligado a uma
+odd real. Corrigido.**
+
+Usuário reportou o sintoma certo: muitos jogos varridos, zero palpites,
+e "só pegamos odds 1x2". Investigação com 3 agentes de exploração em
+paralelo (parsing, wiring do fluxo real, histórico de tentativas)
+confirmou, com evidência e não suposição:
+
+1. **`scripts/scan_odds.py` só procurava o bloco `"Resultado Final"`**
+   e ignorava mercados que já estavam no MESMO dump da listagem, sem
+   custo extra de rede — medido no dump real de 04/08: 182 blocos de 1X2
+   contra **191 de Total de Gols, 191 de Total de Gols 1ºT, 187 de
+   Chance Dupla, 186 de DNB, 61 de BTTS**, todos ignorados.
+2. **`pe_engine.candidato_escanteios()`/`domina_1x2()` e
+   `betting_model.poisson_total()` nunca eram chamados em produção** —
+   só em backtest (contra estatística histórica, sem odd real nenhuma)
+   e em self-tests sintéticos. `scripts/generate_report.py` não importa
+   nenhum dos dois; o "Fluxo diário" nunca citava um comando concreto
+   pra rodá-los, só prosa aspiracional na seção de metodologia.
+3. **`scripts/forma_recente.py` nunca recebeu dado real** — 0 de 21
+   linhas combinadas do ledger usaram o motor de frequência empírica com
+   série jogo-a-jogo real (a única tentativa, 05/08 id=15, esbarrou em
+   paywall do footystats e custo do sofascore, já documentado
+   honestamente no próprio ledger).
+
+**Consequência, e é matemática, não bug de cálculo:** com só 1X2
+disponível — o mercado MAIS eficiente, que a regra v17-b já mandava não
+disputar sem dado forte — zero palpites era o resultado ESPERADO do
+pipeline, não uma falha isolada.
+
+**Fix aplicado (Tier 1, custo zero de rede extra):**
+`scripts/scan_odds.py` ganhou `parse_market_blocks()` (generaliza o
+antigo `parse_mres_blocks()`, mantido como wrapper de compatibilidade
+com `pe_engine.py`) e `parse_todos_mercados()`, que extrai os 6 mercados
+de uma vez do MESMO dump de listagem: 1X2, Total de Gols, Total de Gols
+1ºT, Chance Dupla, DNB, BTTS (dict `MERCADOS`, nomes literais
+confirmados campo a campo, não adivinhados). Novo modo `--csv-jogos`
+persiste o CSV de jogos elegíveis com odds+justo dos 6 mercados —
+substitui a montagem manual que existia só como script solto no
+scratchpad (mesmo erro de persistência que a decisão v26 já tinha
+corrigido pra dumps brutos). `scripts/generate_report.py` (quadro-resumo)
+agora mostra Total de Gols e BTTS além do 1X2.
+
+**Fix aplicado (Tier 3, testado ao vivo, sucesso real):** a página
+INDIVIDUAL do evento (`betano.bet.br/odds/{slug}/{id}/`, URL vem do
+próprio dump da listagem) **tem odds reais de Escanteios e Total de
+Cartões** — testado em 04/08 no evento Boca Juniors x Estudiantes de La
+Plata: bloco "Escanteios" com **13 linhas de handicap reais (3.5 a
+15.5)**, bloco "Total de Cartões" com 1 linha (6.5), ambos com
+`selections`/`price` reais, de-vig plausível (overround 7,1% nos dois).
+Formato diferente da listagem (1 bloco = VÁRIAS linhas no mesmo array de
+`selections`, não 1 bloco por linha) — novo parser dedicado
+`parse_mercados_evento()`/`parse_todos_mercados_evento()`. Só vale a
+pena rodar nos 2-4 jogos aprofundados (1 `nimble_extract` extra por
+jogo, não escalável pros ~80 elegíveis) — ver passo 5.2 do fluxo diário.
+
+**Fix aplicado (Tier 2 — fechar o "nunca é chamado"):** passo 6 do
+"Fluxo diário" reescrito de prosa genérica pra comando concreto: testar
+CADA mercado com odd real disponível (não só 1X2) via 9.1, e usar
+`forma_recente`/`pe_engine.candidato_escanteios()` como PE (9.3) quando
+não houver odd real. Os 5 mercados novos da listagem (totais/dupla
+chance/DNB/BTTS) não precisam de `pe_engine` — são testáveis pelo MESMO
+caminho que 1X2 sempre usou (`devig_power` + `ev_unitario` sobre odd
+real), só que agora alimentados de verdade.
+
+**Fora de escopo desta correção (Tier 4, limite conhecido, não
+resolvido):** a série jogo-a-jogo real dos últimos 3-10 jogos
+(`forma_recente.py`, o método empírico manual do usuário) continua sem
+canal de dado barato — footystats.org é pago pros números, sofascore
+exigiria ~20 buscas por confronto. Isso não trava os mercados de totais/
+BTTS/DNB/escanteios/cartões: para esses, o modelo Poisson (calibrado em
+15.150 jogos reais, decisão 44 — escanteios "ACEITO COM RESSALVA", viés
+1,2%) já serve de estimador de probabilidade contra a odd real, sem
+precisar da série jogo-a-jogo. Cartões/chutes seguem REJEITADOS no
+backtest — mesmo com odd real, reportar com confiança baixa (regra 7).
+Uma fonte paga de dado jogo-a-jogo fica como decisão de investimento do
+usuário, não algo resolvido em código.
+
+Regressão: `validate_system.py` seção 3l testa o parser generalizado com
+dado sintético e confere as contagens contra os dois dumps reais já
+commitados (`data/dumps/2026-08-04-betano.json` e
+`data/dumps/eventos/2026-08-04-betano-boca-estudiantes.json`).
+
 ## Casas licenciadas (SPA/MF)
 
 Betano, Bet Nacional, Superbet, Bet365, Sportingbet, KTO, Novibet,
@@ -1092,7 +1177,13 @@ CONSOLIDADO; (B) PDF anexado; (C) resumo curto no chat (3-5 linhas).
    `nimble_extract` em `betano.bet.br/sport/futebol/jogos-de-hoje/` com
    **`country="BR"`** (contorna o geobloqueio das casas `.bet.br`) e
    **`driver="vx10"`** (o `vx6` padrão estoura timeout de 60s) — método v23.
-   Depois `python3 scripts/scan_odds.py <dump>` → catálogo real com odds.
+   Depois `python3 scripts/scan_odds.py <dump> --casa Betano --data-brt
+   AAAA-MM-DD --csv-jogos data/dumps/AAAA-MM-DD-jogos.csv` → catálogo real
+   **multi-mercado** (v36: 1X2 + Total de Gols + Total de Gols 1ºT + Chance
+   Dupla + DNB + BTTS, todos no MESMO dump, sem custo extra de rede — ver
+   decisão v36 abaixo) já gravado no CSV que o passo 9 usa. NUNCA montar
+   esse CSV à mão num script solto (foi o próprio erro que a decisão v36
+   corrigiu).
 
    **SEMPRE salvar o dump bruto em `data/dumps/YYYY-MM-DD-casa.json` e
    commitar** (v26). Em 01/08 a extração de 542 eventos existiu só na resposta
@@ -1123,10 +1214,25 @@ CONSOLIDADO; (B) PDF anexado; (C) resumo curto no chat (3-5 linhas).
    tentativas frustradas, realocar o esforço para coleta de estatística dos
    DOIS lados dos jogos melhor ranqueados, visando PE (9.3). Apostas de Valor
    ficam estruturalmente indisponíveis nesses dias — declarar isso.
-6. Cálculo NUMÉRICO: lambdas → `poisson_dixon_coles()`; odds →
+5.2. **Escanteios/cartões (v36) — só nos 2-4 jogos aprofundados.**
+   `nimble_extract` (`country=BR`, `driver=vx10`) na página INDIVIDUAL do
+   evento (`betano.bet.br/odds/{slug}/{id}/` — a URL sai do próprio dump
+   da listagem, campo `"url"`) traz odds reais de Escanteios (múltiplas
+   linhas de handicap) e Total de Cartões, que NÃO existem no dump da
+   listagem (passo 4b). `scripts.scan_odds.parse_todos_mercados_evento()`
+   extrai as duas. Custo: 1 `nimble_extract` a mais por jogo aprofundado —
+   por isso só nos 2-4 do dia, nunca nos ~80 da varredura ampla.
+6. Cálculo NUMÉRICO, para CADA mercado com odd real disponível no jogo
+   (1X2, Total de Gols, Total de Gols 1ºT, Chance Dupla, DNB, BTTS do
+   passo 4b; Escanteios/Cartões do passo 5.2 quando aprofundado) — nunca só
+   1X2: lambdas → `poisson_dixon_coles()`/`poisson_total()`; odds →
    `devig_power()`; edge = prob própria - prob justa; `ev_unitario()`; só
-   recomendar com folga clara. Sem odd confiável → PE (9.3) com
-   `wilson_ci()`. Testar robustez com 2-3 cenários de lambda
+   recomendar com folga clara. Sem odd confiável (ou nos mercados fora do
+   passo 5.2) → PE (9.3) com `wilson_ci()`, usando
+   `forma_recente.avaliar_selecao()`/`avaliar_confronto()` quando houver
+   série jogo-a-jogo real (3-10 jogos) coletada, ou
+   `pe_engine.candidato_escanteios()` como estimador derivado do 1X2
+   quando não houver. Testar robustez com 2-3 cenários de lambda
    (conservador/central/agressivo) — sinal só vale se sobreviver aos três.
    Para mata-mata com placar agregado, usar `win_by_margin()` (v15-b).
 7. Append no ledger (commit `"ledger: analise DD/MM"`; push com

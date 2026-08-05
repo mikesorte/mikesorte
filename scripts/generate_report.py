@@ -120,6 +120,20 @@ def montar_bloco_picks(apostas_hoje, pe_hoje):
     </div>"""
 
 
+def _fmt_mercado_ou(j, prefixo, rotulo_over="Mais", rotulo_under="Menos"):
+    """v36: formata um mercado over/under do CSV multi-mercado
+    (scan_odds.escreve_csv_jogos) pra exibicao curta - "-" quando o
+    mercado nao apareceu nesse jogo especifico (mercado ausente e normal,
+    nem toda casa oferece todo mercado pra todo jogo)."""
+    odd0 = (j.get(f"odd_{prefixo}_0") or "").strip()
+    odd1 = (j.get(f"odd_{prefixo}_1") or "").strip()
+    if not odd0 or not odd1:
+        return "-"
+    linha = (j.get(f"linha_{prefixo}") or "").strip()
+    sufixo = f" {linha}" if linha else ""
+    return f"{rotulo_over}{sufixo} @{odd0} / {rotulo_under}{sufixo} @{odd1}"
+
+
 def montar_quadro_resumo(jogos):
     if not jogos:
         return "<p class=\"aviso\">Nenhum jogo do dia registrado em data/dumps/*-jogos.csv.</p>"
@@ -132,6 +146,8 @@ def montar_quadro_resumo(jogos):
               <td class="td-num">{esc(j['odd_1'])}</td>
               <td class="td-num">{esc(j['odd_x'])}</td>
               <td class="td-num">{esc(j['odd_2'])}</td>
+              <td class="td-num">{esc(_fmt_mercado_ou(j, 'total_gols'))}</td>
+              <td class="td-num">{esc(_fmt_mercado_ou(j, 'btts', 'Sim', 'Não'))}</td>
               <td class="td-nota">{esc(j.get('nota', ''))}</td>
             </tr>"""
         for j in jogos
@@ -140,7 +156,8 @@ def montar_quadro_resumo(jogos):
     <table class="tabela-resumo">
       <thead><tr>
         <th>Confronto</th><th>Competição</th><th>Horário (BRT)</th>
-        <th>Casa</th><th>1</th><th>X</th><th>2</th><th>Nota</th>
+        <th>Casa</th><th>1</th><th>X</th><th>2</th>
+        <th>Total de Gols</th><th>Ambas Marcam</th><th>Nota</th>
       </tr></thead>
       <tbody>{linhas}</tbody>
     </table>"""
