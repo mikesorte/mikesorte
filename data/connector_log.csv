@@ -16,3 +16,4 @@ timestamp_utc,hora_utc,nimble,tavily,exa,contexto,dispositivo,nota
 2026-08-03T09:44:53+00:00,9,fora,fora,fora,interativo,pc,tentativa apos revisao semanal 03/08
 2026-08-03T10:18:50+00:00,10,ok,ok,ok,interativo,pc,"fluxo diario 03/08 pos-plano - todos no ar via ToolSearch, mudanca de estado"
 2026-08-05T01:09:17+00:00,1,ok,ok,ok,interativo,desconhecido,diaria - execucao apos autorizacao vai (dispositivo nao confirmado com o usuario)
+2026-08-05T10:56:46+00:00,10,ok,ok,ok,interativo,desconhecido,"diaria 07h, autorizado pelo usuario via chat apos push"
