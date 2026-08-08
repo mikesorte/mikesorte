@@ -37,7 +37,9 @@ import argparse
 import csv
 import os
 import sys
-from datetime import date
+from datetime import datetime, timedelta, timezone
+
+BRT = timezone(timedelta(hours=-3))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG = os.path.join(ROOT, "data/extraction_log.csv")
@@ -145,7 +147,11 @@ def registrar(casa, ferramenta, resultado, jogo="", nota=""):
         raise ValueError(f"resultado invalido: {resultado}. Use um de {RESULTADOS}")
     _garantir_log()
     with open(LOG, "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([date.today().isoformat(), casa, ferramenta,
+        # BRT explicito, nunca date.today() (fuso do servidor/UTC) - achado
+        # de auditoria (08/08), mesma classe do bug real cometido ao vivo
+        # nesta sessao (perto da meia-noite UTC, "hoje" em BRT ainda e
+        # ontem).
+        csv.writer(f).writerow([datetime.now(BRT).date().isoformat(), casa, ferramenta,
                                 resultado, jogo, nota])
 
 

@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v36 (04/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v37 (08/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -78,7 +78,7 @@ execução; dado > narrativa de tipster.
 `claude/scheduled-task-creation-arcifj` (em `/home/user/mikesorte`):
 `data/apostas_ledger.csv` + `data/pe_ledger.csv` (append-only, fonte da
 verdade do histórico) e `scripts/betting_model.py` (Dixon-Coles,
-devig_power, wilson_ci, ev_unitario, kelly, clv, brier — USO OBRIGATÓRIO,
+devig_power, wilson_ci, ev_unitario, kelly_fraction, clv, brier — USO OBRIGATÓRIO,
 nunca estimar de cabeça); CLV finalmente mensurável (registrar odd de
 fechamento na execução seguinte ao jogo); achados estatísticos:
 6/16=37,5% [Wilson 18,5-61,4%] indistinguível de breakeven com N atual.
@@ -89,7 +89,10 @@ regressão do motor; exit 1 = corrigir antes de analisar; pendências =
 primeira tarefa do dia); (b) `scripts/ledger_stats.py` — TODOS os números
 de relatório/PDF/chat saem deste script, nunca copiados a mão; (c)
 robustez git: `pull --rebase` antes de append; push com retry 4x backoff
-2/4/8/16s; nunca forçar push; (d) CLVs históricos ids 3-7: RESOLVIDO em
+2/4/8/16s — **`scripts/git_push_retry.sh` (achado de auditoria, 08/08: essa
+regra nunca tinha virado código, cada execução reimplementava a mão em
+bash cru sem nenhuma verificação automática)**; nunca forçar push; (d) CLVs
+históricos ids 3-7: RESOLVIDO em
 28/07; (e) LIMITE HONESTO: perfeição/lucro passivo NÃO existem em
 apostas; o sistema elimina erros EVITÁVEIS e acumula N; variância e reds
 continuarão; decisão de "colher frutos" só em N≥300-500 com CLV+ e
@@ -1115,6 +1118,147 @@ dado sintético e confere as contagens contra os dois dumps reais já
 commitados (`data/dumps/2026-08-04-betano.json` e
 `data/dumps/eventos/2026-08-04-betano-boca-estudiantes.json`).
 
+(49) v37 (08/08, pedido do usuário): **auditoria multi-agente de todo o
+sistema (6 agentes em paralelo, um por área — motor estatístico,
+extração/parsing, ledger/calibração, coerência metodologia×código,
+backtesting, infraestrutura) e correção de todos os achados acionáveis.**
+
+Pedido do usuário: "crie multi agentes de diversas áreas correlatas, para
+verificar todo o sistema... para melhorarmos tudo e corrigir e evoluir
+tudo que precisa." Os 6 agentes leram cada arquivo por completo, rodaram
+código de verdade (não só leitura estática) e reportaram achados
+concretos com cenário de falha, arquivo:linha e severidade — nenhum
+achado foi aceito sem reprodução. Resultado: 34 achados, 2 críticos
+(afetam decisão de apostar com dinheiro real) e o resto moderado/
+cosmético. Todos os acionáveis foram corrigidos e testados; os poucos que
+ficaram só como nota de documentação estão listados no fim.
+
+**Críticos, corrigidos:**
+1. `betting_model.prob_combinada()`/`ev_combinada()` não travavam pernas
+   MECANICAMENTE ligadas do mesmo jogo (ex.: 1X2 × BTTS do mesmo evento,
+   que vêm do mesmo placar). Demonstrado numericamente: isso infla a
+   probabilidade combinada em até 31% e fabrica EV positivo que não
+   existe — e combinada usa STAKE real, diferente de PE. Fix: as duas
+   funções agora exigem uma CATEGORIA por perna (`(prob, categoria)`) e
+   rejeitam categoria repetida com `ValueError`, forçando o chamador a
+   declarar de que família cada perna vem em vez de confiar em disciplina
+   manual. `forma_recente.py` e os self-tests atualizados para a nova
+   assinatura.
+2. `generate_report.py` confundia "nenhum jogo testado hoje" (zero linhas
+   no ledger pra aquela data) com "testado e sem edge" no banner
+   principal do PDF — reproduzido ao vivo rodando `--data` numa data sem
+   dado nenhum. Fix: banner distinto ("SEM DADO REGISTRADO HOJE") quando
+   não há nenhuma linha em nenhum dos dois ledgers pra aquela data.
+
+**Moderados, corrigidos (lista resumida — cada um tem comentário no
+código do commit explicando o achado e o fix; ver `git log`/diff para o
+raciocínio completo):**
+- `pe_engine.PISO_ALTA`/`PISO_MODERADA` (75%/65%) divergiam dos números
+  que a doc citava (60%/40-60%) — nunca bateram; doc corrigida pra
+  descrever os DOIS métodos de PE que existem hoje (`forma_recente.py` e
+  `pe_engine.py`), cada um com seu critério real (item 9.3).
+- Passo 5 do fluxo diário ainda citava o método v9 antigo (sem
+  `country=BR`/`driver=vx10`), o mesmo que a decisão 36/v23 já provou que
+  falha — corrigido pra apontar pro método real.
+- `devig_shin` (validado como melhor contra dado real, decisão 42) nunca
+  tinha sido ligado ao pipeline que gera o CSV/decide Aposta de Valor —
+  `scan_odds.py` só usava `devig_power`. Agora usa Shin com fallback
+  automático pra Power se Shin não convergir.
+- Viés de escanteios (1,2%, dataset 2000-2013) aplicado em 2026 sem
+  nenhum desconto pela defasagem — `pe_engine.candidato_escanteios()`
+  ganhou um desconto temporal heurístico (declarado como heurística NÃO
+  calibrada, não medição) proporcional às décadas decorridas.
+- `ledger_stats.py`: alerta de concentração 1X2 contava uma linha de
+  mercado combinado várias vezes (denominador errado) — reportava 53%
+  quando o real era ~77%; corrigido pra contar por LINHA.
+- A regra "viés>5pp com N≥10 por família é alerta" (v28) só existia como
+  texto — `ledger_stats.py` agora compara de verdade a taxa observada
+  contra o piso Alta/Moderada de `pe_engine.py`, por (mercado,
+  confiança), e dispara alerta real quando N≥10.
+- Retry de push com backoff (decisão 23c) nunca tinha virado código —
+  `scripts/git_push_retry.sh` (4x, 2/4/8/16s).
+- Escrita de CSV em `scan_odds.escreve_csv_jogos()` não era atômica —
+  agora escreve em arquivo temporário + `os.replace()`.
+- `league_calendar.py --mes 0` caía silenciosamente no mês atual (bug de
+  truthiness do Python, `x or default`); `--mes 13/-1` não avisava —
+  corrigido com checagem explícita `is not None` + validação de faixa
+  1-12.
+- Filtro de base/reserva não pegava "Categoria Reserva" em português (só
+  o inglês "reserve") — já aparecia sem filtro no dump real de produção;
+  adicionado `\breserva\b`.
+- `date.today()` (fuso do servidor/UTC) em vez de BRT explícito em
+  `league_calendar.py`, `odds_sources.py` e `validate_system.py` — a
+  MESMA classe do bug de fuso horário cometido ao vivo nesta sessão
+  (dump nomeado com data UTC quando ainda era o dia anterior em BRT).
+  Todos os três corrigidos pra usar BRT explícito.
+- `scan_odds.py` ganhou: detecção de dump truncado (rede caiu no meio da
+  extração — antes produzia catálogo silenciosamente menor sem aviso);
+  detecção de colisão quando dois blocos do mesmo mercado batem no mesmo
+  evento (antes descartava em silêncio); fallback de busca por nome de
+  mercado com unicode escapado (`\uXXXX`); captura da URL da página
+  individual do evento quando presente no dump da listagem (cobertura
+  PARCIAL, corrigindo o excesso de confiança da decisão 48 — medido em
+  586 de ~900+ eventos, não universal).
+- `kelly_fraction()` crashava com odd=1.0 (`ZeroDivisionError`) e aceitava
+  odd<1.0 sem rejeitar — validado (código morto na fase B1, mas a fase B2
+  depende dele).
+- `poisson_grid()`/`over_under_time()` tinha truncamento quebrado —
+  retornava ~0% de over pra linhas perto/acima de `max_n` não importa o
+  lambda real (reproduzido: lambda=20, linha 15.5 → 0% quando o real é
+  ~84%). Fix usa a marginal Poisson direta (mesma técnica tail-safe de
+  `poisson_total`), e o self-test do grid deixou de ser tautológico
+  (antes forçava soma=1 por construção).
+- Dixon-Coles podia gerar probabilidade NEGATIVA numa célula em
+  favoritos extremos (lambda alto × rho forte, ambos dentro da faixa
+  aceita) — clampado em 0.
+- `devig_shin`, `devig_proporcional`, `brier`, `kelly_fraction` não tinham
+  nenhum teste de regressão com valor conhecido — adicionados, incluindo
+  o caso negativo (categoria repetida em combinada, odd inválida em
+  Kelly). `escreve_csv_jogos()` e `ledger_stats.py` (o script que gera
+  TODOS os números oficiais do relatório) também ganharam regressão
+  própria pela primeira vez.
+- `subprocess.run()` sem timeout em `generate_report.py` (Chromium e
+  `ledger_stats.py`) — risco de hang indefinido; adicionado timeout com
+  aviso claro em vez de travar.
+- `devig_proporcional` vivia em `pe_engine.py`, fora da centralização
+  "obrigatória" do motor de cálculo (decisão 22) — movido pra
+  `betting_model.py`.
+- Duplicação de ~70 linhas entre `poisson_dixon_coles`/`gols_dixon_coles`
+  — fatorada num helper único (`_dixon_coles_grid`).
+- `backtest_real.py` chamava `implied_lambdas()` (Newton solver caro) 5x
+  sem necessidade dentro do loop de cenários de dispersão, e a config
+  "produção" recomputava tudo de novo apesar de ser idêntica à "shin" —
+  corrigido (tempo de execução caiu de ~6min pra ~3min, medido). Rodado
+  de ponta a ponta após o fix: números batem exatamente com o veredito
+  documentado na decisão 42 (Brier v27=0,23099, shin=0,23091,
+  v28=0,23357 — v28 PIORA confirmada de novo).
+- Cálculo de correlação phi entre categorias (decisão 45) só existia
+  como resultado documentado, sem script — `scripts/
+  compute_market_correlation.py` reproduz o cálculo contra o dataset
+  real; rodado e bateu quase exato com os números da decisão 45 (phi
+  -0,0043/+0,0107/-0,0096 vs -0,004/+0,011/-0,010 documentados).
+- Bloco "PALPITES ESTATISTICOS" do `ledger_stats.py` não avisava amostra
+  pequena, ao contrário do bloco de calibração logo abaixo — corrigido
+  pra consistência.
+- Nomes desatualizados na doc (`kelly` → `kelly_fraction`) e item "piso
+  ~30%" sem constante correspondente no código atual — corrigidos/
+  anotados.
+
+**Fora de escopo, declarado (achados reais mas não fundidos em código
+nesta correção):** o corte ACEITO/REJEITADO de 1,5% de viés
+(`backtest_cartoes.py`) é um limiar arbitrário, não estatístico — cartões
+foi rejeitado por só 0,04pp acima dele; mantido como está porque mudar o
+corte é decisão de metodologia, não bug, e afetaria o veredito de
+produção sem novo dado que justifique o número certo. `agent_reach_fallback.le_pagina()`
+não checa `disponivel()` antes de tentar rede — isso é intencional
+(leitura via Jina não depende do binário `mcporter`), documentado como
+tal, não é bug.
+
+Nenhum arquivo de dado (ledgers, dumps) foi alterado retroativamente além
+do já documentado nas decisões anteriores — toda mudança desta decisão é
+em código/documentação. `validate_system.py` roda limpo (exit 0) com
+todos os novos testes após cada mudança individual, não só no final.
+
 ## Casas licenciadas (SPA/MF)
 
 Betano, Bet Nacional, Superbet, Bet365, Sportingbet, KTO, Novibet,
@@ -1204,7 +1348,15 @@ CONSOLIDADO; (B) PDF anexado; (C) resumo curto no chat (3-5 linhas).
    de eficiência BAIXA precificadas pelas casas BR (regra 8) e diversidade de
    região — não só Brasileirão. Declarar "dia fraco" só é aceitável depois de
    4a + 4c terem sido executados e reportados.
-5. Odds reais (método v9 quando disponível; senão WebSearch triangulado).
+5. Odds reais: o dump do passo 4b já traz odds de TODOS os 6 mercados de
+   listagem (decisão v36) para o catálogo elegível inteiro — não é preciso
+   buscar de novo jogo a jogo. **Correção (achado de auditoria, 08/08):**
+   esta linha citava o "método v9" antigo (`nimble_extract` sem
+   `country="BR"`/`driver="vx10"`), que a decisão 36/v23 já mostrou que
+   falha por geo-bloqueio e timeout — usar sempre os parâmetros do passo
+   4b. Odds adicionais (escanteios/cartões por evento individual) vêm do
+   passo 5.2. Sem Nimble (turno agendado, decisão 39), WebSearch
+   triangulado é o único canal restante — limite honesto, declarar (v17-4).
 5.0. **Cascata de extração (v18) — obrigatória antes de desistir de odds:**
    Nimble → Exa (`web_fetch_exa`) → Tavily → WebSearch. Declarar no relatório
    qual nível foi usado. "Nimble fora" NÃO é justificativa para pular para
@@ -1327,17 +1479,35 @@ muitos; cobertura parcial declarada.
 9.1. NO-VIG: dois lados MESMA casa → `devig_power()` → prob justa; edge
      numérico + EV exibidos; folga clara obrigatória; PE testável =
      retestar e substituir.
-9.2. Piso ~30% gated por valor.
-9.3. PE: só após tentar 9.1; EWMA + convergência dos DOIS lados
-     obrigatória + `wilson_ci()` (limite inferior decide: Alta ≥60% com
-     convergência e N≥5/lado ou disparidade muito grande documentada;
-     Moderada 40-60%/parcial; Baixa = não reportar); rótulo obrigatório
+9.2. Piso mínimo gated por valor. **Correção (achado de auditoria, 08/08):**
+     o "~30%" herdado de v1-v4 não corresponde a nenhuma constante no código
+     atual — os pisos reais que rodam hoje são os do item 9.3(b)
+     (`PISO_ALTA=0,75`/`PISO_MODERADA=0,65`, `pe_engine.py`) e o corte por
+     EV/Wilson do item 9.3(a) (`forma_recente.py`). Este item fica como
+     lembrete do PRINCÍPIO (nunca recomendar com probabilidade baixa demais
+     pra ser defensável), não como número a checar contra código.
+9.3. PE: só após tentar 9.1; sem stake; rótulo obrigatório sempre
      ("PALPITE ESTATÍSTICO (sem odd confirmada/testada) — leitura de
      tendência com base em dados reais, NÃO é aposta de valor calculada.
-     Confirme a odd disponível antes de decidir."); sem stake; registrar
-     no pe_ledger. Quando a odd provável da seleção for <1,40, anotar no
-     PE que dificilmente viraria aposta de valor (registro vale para
-     calibração).
+     Confirme a odd disponível antes de decidir."); registrar no pe_ledger.
+     Quando a odd provável da seleção for <1,40, anotar no PE que
+     dificilmente viraria aposta de valor (registro vale para calibração).
+     **Dois métodos, com critérios DIFERENTES — achado de auditoria (08/08):
+     a redação original desta seção ("Alta ≥60%... Moderada 40-60%") nunca
+     bateu com nenhum dos dois códigos reais; corrigido aqui para refletir
+     o que de fato roda:**
+     (a) `forma_recente.avaliar_selecao()`/`avaliar_confronto()` (série
+     real dos últimos 3-10 jogos, decisão 45): EWMA + convergência dos DOIS
+     lados quando ambos disponíveis (decisão 46 permite 1 lado só se for o
+     dominante do confronto) + `wilson_ci()` — o limite inferior de Wilson
+     é comparado contra a probabilidade implícita da ODD OFERECIDA (quando
+     houver), veredito binário "candidato"/"não recomendar"/"amostra
+     insuficiente", sem faixa Alta/Moderada numérica fixa.
+     (b) `pe_engine.py` (derivado do 1X2 via inversão Dixon-Coles, decisão
+     41): usa faixa fixa sobre a probabilidade do PIOR cenário —
+     `PISO_ALTA=0,75`, `PISO_MODERADA=0,65` — deliberadamente mais rígida
+     que a redação antiga desta seção, porque o próprio código documenta a
+     razão ("calibrados para serem defensáveis, não generosos").
 10. Combinadas: odd FINAL ≥1,40; cada perna no 9.1; correlação declarada
     sem par negativo; prob conjunta real via `betting_model.prob_combinada()`
     /`odd_combinada()`/`ev_combinada()` (v33, decisão 45 — substituiu o

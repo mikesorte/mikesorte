@@ -212,10 +212,12 @@ def _demo():
           f"@1.20 -> EV {av_gols['ev']:+.3f}u")
 
     odds = [av["odd_oferecida"], av_gols["odd_oferecida"]]
-    probs = [av["prob_conservadora"], av_gols["prob_conservadora"]]
+    # categoria obrigatoria (guarda de codigo contra combinar pernas do
+    # mesmo desfecho subjacente - ver betting_model.prob_combinada)
+    pernas = [(av["prob_conservadora"], "escanteios"), (av_gols["prob_conservadora"], "gols")]
     print(f"\nodd combinada: {odd_combinada(odds):.2f}")
-    print(f"prob combinada (conservadora): {prob_combinada(probs):.1%}")
-    print(f"EV combinada: {ev_combinada(probs, odds):+.3f}u")
+    print(f"prob combinada (conservadora): {prob_combinada(pernas):.1%}")
+    print(f"EV combinada: {ev_combinada(pernas, odds):+.3f}u")
     print("\nLEMBRETE: independencia validada empiricamente so entre CATEGORIAS")
     print("DIFERENTES (ver betting_model.prob_combinada) - nunca combinar mercados")
     print("que descrevem o mesmo desfecho subjacente (ex. Over gols + BTTS).")

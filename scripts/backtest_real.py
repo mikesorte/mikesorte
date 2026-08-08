@@ -93,27 +93,37 @@ def desfechos_reais(gh, ga):
 
 
 def probs_config(odds, config):
-    """Probabilidades derivadas sob uma configuracao. None se a inversao falhar."""
+    """Probabilidades derivadas sob uma configuracao. None se a inversao falhar.
+
+    "producao" e IDENTICO a "shin" hoje (devig_shin + sem dispersao,
+    decisao 42) - mantido como config separada so por legibilidade da
+    tabela de saida (deixa explicito qual coluna e "o que roda de
+    verdade"), nao porque calcula algo diferente."""
     try:
         if config == "v27":
             justo, disp = devig_power(odds), (None,)
-        elif config == "shin":
+        elif config in ("shin", "producao"):
             justo, disp = devig_shin(odds), (None,)
         elif config == "v28":
             justo, disp = devig_shin(odds), DISPERSOES
-        elif config == "producao":
-            justo, disp = devig_shin(odds), (None,)
         else:
             raise ValueError(config)
     except Exception:
         return None
 
+    # Achado de auditoria (08/08): implied_lambdas() (um solve de Newton
+    # caro) era chamado DENTRO do loop "for forma in disp", embora nao
+    # dependa de 'forma' (forma so entra em gols_dixon_coles, a dispersao
+    # da PROJECAO, nao a inversao do 1X2 que gera lh/la). Pra config="v28"
+    # (5 cenarios de dispersao) isso repetia o solve 5x por nada - movido
+    # pra fora do loop, roda 1x e reusa pros 5 cenarios.
+    try:
+        lh, la = implied_lambdas(*justo)
+    except InversaoFalhou:
+        return None
+
     acumulado = {}
     for forma in disp:
-        try:
-            lh, la = implied_lambdas(*justo)
-        except InversaoFalhou:
-            return None
         d = gols_dixon_coles(lh, la, rho=-0.11, forma=forma)
         vals = {
             "Over 1.5": d["over_1.5"], "Over 2.5": d["over_2.5"],
@@ -127,18 +137,31 @@ def probs_config(odds, config):
 
 
 def avalia(jogos, configs=("v27", "shin", "v28", "producao")):
-    """{config: {mercado: [(prob_afirmada, ocorreu), ...]}}"""
+    """{config: {mercado: [(prob_afirmada, ocorreu), ...]}}
+
+    Achado de auditoria (08/08): "producao" e identico a "shin" em
+    probs_config() - calcular os dois de verdade era 100% trabalho
+    duplicado. Se ambos estiverem em 'configs', "producao" reusa o
+    resultado ja computado de "shin" em vez de rechamar probs_config()."""
+    configs_unicas = [c for c in configs if not (c == "producao" and "shin" in configs)]
     out = {c: {} for c in configs}
     descartados = 0
     for odds, gh, ga, _liga in jogos:
         reais = desfechos_reais(gh, ga)
-        for c in configs:
+        resultados_linha = {}
+        for c in configs_unicas:
             p = probs_config(odds, c)
+            resultados_linha[c] = p
             if p is None:
                 descartados += 1
                 continue
             for merc, prob in p.items():
                 out[c].setdefault(merc, []).append((prob, reais[merc]))
+        if "producao" in configs and "shin" in configs:
+            p_shin = resultados_linha.get("shin")
+            if p_shin is not None:
+                for merc, prob in p_shin.items():
+                    out["producao"].setdefault(merc, []).append((prob, reais[merc]))
     return out, descartados
 
 

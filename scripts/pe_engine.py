@@ -58,7 +58,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from betting_model import (poisson_dixon_coles, gols_dixon_coles,
                            implied_lambdas, devig_power, devig_shin,
-                           InversaoFalhou, poisson_total, ewma_shrinkage)
+                           devig_proporcional, InversaoFalhou, poisson_total,
+                           ewma_shrinkage)
 import scan_odds
 
 # Cenarios de robustez: (rho, forma_dispersao). forma None = Poisson puro.
@@ -116,14 +117,6 @@ OVERROUND_MIN, OVERROUND_MAX = 0.005, 0.25
 MERCADOS_CONTEXTO = ("Dupla chance 1X", "Dupla chance X2", "Dupla chance 12")
 
 
-def devig_proporcional(odds):
-    imps = [1.0 / o for o in odds]
-    s = sum(imps)
-    if s <= 1.0:
-        raise ValueError("odds sem margem - dado de agregador (regra v8)")
-    return [i / s for i in imps]
-
-
 def mercados_derivados(lh, la, rho, forma=None):
     """Todos os mercados que saem dos lambdas, com nome legivel.
 
@@ -161,9 +154,21 @@ def mercados_derivados(lh, la, rho, forma=None):
 # ver scripts/backtest_cartoes.py e scripts/backtest_chutes.py).
 VIES_MAX_ESCANTEIOS = 0.012  # pior vies documentado no backtest (Fase 1, ACEITO COM RESSALVA)
 
+# DESCONTO TEMPORAL (achado de auditoria, 08/08): o backtest que produziu
+# VIES_MAX_ESCANTEIOS usa dado de 2000-2013 (scripts/baixa_dados_backtest.py,
+# decisao 44) - a ressalva "futebol mudou (VAR, pressing)" sempre existiu em
+# prosa mas nunca virou numero. Nao ha dado recente pra CALIBRAR quanto o
+# viés real cresceu com a defasagem (esse e exatamente o problema - sem
+# dado novo nao da pra medir), entao isto e uma HEURISTICA declarada, nao
+# uma medicao: soma um desconto extra proporcional ao tempo decorrido desde
+# o fim do dataset, pequeno o bastante pra nao dominar o vies medido mas
+# grande o bastante pra nao fingir que 2013 e 2026 sao a mesma coisa.
+DATASET_ESCANTEIOS_ULTIMO_ANO = 2013
+DESCONTO_TEMPORAL_POR_DECADA = 0.005  # heuristica, NAO calibrada com dado real
+
 
 def candidato_escanteios(historico_casa, historico_fora, media_liga,
-                         linhas=(8.5, 9.5, 10.5), alpha=3.0):
+                         linhas=(8.5, 9.5, 10.5), alpha=3.0, ano_referencia=None):
     """Gera candidatos de escanteios no MESMO formato dos candidatos de
     avalia_evento(), usando o modelo ACEITO COM RESSALVA na Fase 1
     (scripts/backtest_escanteios.py, N=15137, Poisson puro, vies max 1.2%).
@@ -176,9 +181,19 @@ def candidato_escanteios(historico_casa, historico_fora, media_liga,
     responsabilidade de quem chama.
 
     A probabilidade reportada ja vem DESCONTADA do vies maximo documentado
-    (VIES_MAX_ESCANTEIOS) - a mesma filosofia de "sempre reportar o numero
-    mais defensavel" que os cenarios de gols usam com o pior cenario.
+    (VIES_MAX_ESCANTEIOS) MAIS um desconto temporal heuristico (ver nota
+    acima) - a mesma filosofia de "sempre reportar o numero mais
+    defensavel" que os cenarios de gols usam com o pior cenario.
+    'ano_referencia': None usa o ano atual em BRT; passar explicito so em
+    teste/backtest para nao depender do relogio do sistema.
     """
+    if ano_referencia is None:
+        from datetime import datetime, timezone, timedelta
+        ano_referencia = datetime.now(timezone(timedelta(hours=-3))).year
+    decadas_decorridas = max(0.0, (ano_referencia - DATASET_ESCANTEIOS_ULTIMO_ANO) / 10.0)
+    desconto_temporal = decadas_decorridas * DESCONTO_TEMPORAL_POR_DECADA
+    vies_total = VIES_MAX_ESCANTEIOS + desconto_temporal
+
     lam_casa = ewma_shrinkage(historico_casa, media_liga, alpha=alpha)
     lam_fora = ewma_shrinkage(historico_fora, media_liga, alpha=alpha)
     lam_total = (lam_casa + lam_fora) / 2.0
@@ -187,7 +202,7 @@ def candidato_escanteios(historico_casa, historico_fora, media_liga,
     candidatos = []
     for linha in linhas:
         for direcao, prob in (("Over", dist[f"over_{linha}"]), ("Under", dist[f"under_{linha}"])):
-            prob_conservadora = max(0.0, prob - VIES_MAX_ESCANTEIOS)
+            prob_conservadora = max(0.0, prob - vies_total)
             if prob_conservadora >= PISO_ALTA:
                 faixa = "Alta"
             elif prob_conservadora >= PISO_MODERADA:
@@ -203,8 +218,11 @@ def candidato_escanteios(historico_casa, historico_fora, media_liga,
                 "odd_justa": 1.0 / prob_conservadora,
                 "lambdas": (lam_casa, lam_fora),
                 "ressalva": ("modelo ACEITO COM RESSALVA (Fase 1, vies max "
-                             f"{VIES_MAX_ESCANTEIOS:.1%} documentado) - probabilidade "
-                             "ja ajustada conservadoramente"),
+                             f"{VIES_MAX_ESCANTEIOS:.1%} documentado no backtest 2000-"
+                             f"{DATASET_ESCANTEIOS_ULTIMO_ANO}) + desconto temporal "
+                             f"heuristico de {desconto_temporal:.1%} ({decadas_decorridas:.1f} "
+                             "decada(s) de defasagem, nao calibrado com dado real) - "
+                             "probabilidade ja ajustada conservadoramente"),
             })
     candidatos.sort(key=lambda c: -c["prob_pior_cenario"])
     return candidatos

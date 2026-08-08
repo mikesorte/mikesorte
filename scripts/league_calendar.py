@@ -24,7 +24,18 @@ Uso:
     python3 scripts/league_calendar.py --prioridade    # ordenado por prioridade de busca
 """
 import argparse
-from datetime import date
+import sys
+from datetime import datetime, timedelta, timezone
+
+BRT = timezone(timedelta(hours=-3))
+
+
+def _mes_hoje_brt():
+    """Mes atual em BRT, nunca no fuso do servidor/UTC (achado de auditoria,
+    08/08 - a mesma classe do bug real cometido ao vivo nesta sessao: perto
+    da meia-noite UTC, 'hoje' em BRT ainda e o dia anterior, e ~3h por dia
+    o MES tambem pode divergir perto da virada do mes)."""
+    return datetime.now(BRT).month
 
 # ---------------------------------------------------------------- constantes
 # eficiencia: quanto MAIOR, mais eficiente o mercado (mais dificil achar edge).
@@ -152,8 +163,12 @@ LIGAS = [
 
 
 def ligas_ativas(mes=None):
-    """Ligas com rodadas tipicamente acontecendo no mes dado (default: hoje)."""
-    mes = mes or date.today().month
+    """Ligas com rodadas tipicamente acontecendo no mes dado (default: hoje
+    em BRT). 'mes' explicito e usado tal como veio - so o DEFAULT usa o
+    relogio."""
+    mes = mes if mes is not None else _mes_hoje_brt()
+    if not 1 <= mes <= 12:
+        raise ValueError(f"mes tem que estar entre 1 e 12, recebido {mes}")
     return [lg for lg in LIGAS if mes in lg["meses"]]
 
 
@@ -188,8 +203,15 @@ def main():
     ap.add_argument("--prioridade", action="store_true")
     args = ap.parse_args()
 
-    mes = args.mes or date.today().month
-    ligas = ligas_por_prioridade(mes) if args.prioridade else ligas_ativas(mes)
+    # achado de auditoria (08/08): "args.mes or _mes_hoje_brt()" tratava
+    # --mes 0 como falsy (Python) e silenciosamente usava o mes atual em
+    # vez do 0 literal ou de um erro - "is not None" e a checagem certa.
+    mes = args.mes if args.mes is not None else _mes_hoje_brt()
+    try:
+        ligas = ligas_por_prioridade(mes) if args.prioridade else ligas_ativas(mes)
+    except ValueError as e:
+        print(f"ERRO: {e}", file=sys.stderr)
+        return 1
 
     print(f"=== LIGAS TIPICAMENTE ATIVAS NO MES {mes:02d} ({len(ligas)}) ===")
     if args.prioridade:
@@ -212,4 +234,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

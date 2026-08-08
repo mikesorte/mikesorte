@@ -103,13 +103,32 @@ def montar_bloco_picks(apostas_hoje, pe_hoje):
         )
         return f'<ol class="picks-list">{itens}</ol>'
 
+    # Achado de auditoria (08/08), reproduzido rodando --data numa data sem
+    # nenhum arquivo de jogos.csv/linha de ledger: o banner abaixo dizia
+    # "Nenhuma Aposta de Valor nem Palpite Estatistico passou nos criterios"
+    # tanto quando jogos foram TESTADOS e reprovados quanto quando NENHUM
+    # jogo foi sequer testado (zero linhas no ledger pra essa data) - as
+    # duas situacoes sao muito diferentes (uma e resultado do processo, a
+    # outra e ausencia de execucao/dado) e o texto as confundia. Banner
+    # distinto para "sem dado nenhum".
+    if not apostas_hoje and not pe_hoje:
+        return """
+    <div class="banner-sem-palpites">
+      <div class="banner-titulo">SEM DADO REGISTRADO HOJE</div>
+      <p class="banner-sub">Nenhum jogo foi TESTADO nesta data - zero linhas em
+      data/apostas_ledger.csv e data/pe_ledger.csv para este dia. Isto e
+      diferente de "testado e sem edge": nao houve processo nenhum a avaliar
+      aqui. Verifique se a execucao diaria rodou, se os conectores estavam
+      disponiveis e se data/dumps/&lt;data&gt;-jogos.csv existe.</p>
+    </div>"""
+
     motivos = "\n".join(
         f"""<li class="no-pick-row">
               <span class="no-pick-jogo">{esc(r.get('confronto', ''))}</span>
               <span class="no-pick-motivo">{esc(motivo_sem_selecao(r.get('selecao', '')))}</span>
             </li>"""
         for r in apostas_hoje
-    ) or '<li class="no-pick-row"><span class="no-pick-motivo">Nenhum jogo testado hoje.</span></li>'
+    ) or '<li class="no-pick-row"><span class="no-pick-motivo">Testado, mas nenhum PE passou no criterio de convergencia/Wilson.</span></li>'
 
     return f"""
     <div class="banner-sem-palpites">
@@ -195,8 +214,15 @@ def montar_cards_jogos(jogos, apostas_hoje):
 
 
 def rodar_ledger_stats():
-    r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "ledger_stats.py")],
-                        capture_output=True, text=True, cwd=ROOT)
+    # timeout adicionado (achado de auditoria, 08/08): sem isto, um hang em
+    # ledger_stats.py travaria generate_report.py indefinidamente, sem
+    # nenhum watchdog. 30s e generoso pro que o script faz hoje (le 2 CSVs
+    # pequenos e imprime).
+    try:
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "ledger_stats.py")],
+                            capture_output=True, text=True, cwd=ROOT, timeout=30)
+    except subprocess.TimeoutExpired:
+        return "ERRO: ledger_stats.py nao terminou em 30s (timeout) - numeros abaixo podem estar incompletos."
     return r.stdout
 
 
@@ -379,7 +405,17 @@ def gerar_pdf(html_path, pdf_path):
         f"--print-to-pdf={pdf_path}", "--no-pdf-header-footer",
         f"file://{html_path}",
     ]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    # timeout adicionado (achado de auditoria, 08/08): uma pagina HTML
+    # malformada travando o Chromium headless travaria generate_report.py
+    # indefinidamente, sem nenhum watchdog. 60s e generoso pro relatorio
+    # diario (paginas de dezenas a centenas de jogos, nunca observado acima
+    # de poucos segundos de render real).
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        print("AVISO: Chromium nao terminou em 60s (timeout) - PDF pode estar ausente/incompleto.",
+              file=sys.stderr)
+        return False
     return os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0
 
 

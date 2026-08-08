@@ -27,12 +27,9 @@ def _pois(lmbda, k):
     return math.exp(-lmbda) * lmbda ** k / math.factorial(k)
 
 
-def poisson_dixon_coles(lambda_home, lambda_away, rho=-0.11, max_goals=10):
-    """Matriz de placares Poisson com correcao Dixon-Coles (tau) nos placares
-    baixos (0-0, 1-0, 0-1, 1-1). rho tipico da literatura: ~-0.1.
-
-    Retorna dict com p_home, p_draw, p_away, over/under 1.5/2.5/3.5, btts.
-    """
+def _tau_dixon_coles(lambda_home, lambda_away, rho):
+    """Fator de correcao tau nos 4 placares baixos (0-0/1-0/0-1/1-1) -
+    parametrizacao original de Dixon & Coles 1997."""
     def tau(x, y):
         if x == 0 and y == 0:
             return 1 - lambda_home * lambda_away * rho
@@ -43,12 +40,29 @@ def poisson_dixon_coles(lambda_home, lambda_away, rho=-0.11, max_goals=10):
         if x == 1 and y == 1:
             return 1 - rho
         return 1.0
+    return tau
 
+
+def _dixon_coles_grid(lambda_home, lambda_away, rho, max_goals, pmf_home, pmf_away):
+    """Grid conjunto Dixon-Coles generico, parametrizado pela funcao de
+    massa de cada lado (Poisson pura ou binomial negativa via _negbin) -
+    fatora a duplicacao que existia entre poisson_dixon_coles() e
+    gols_dixon_coles(forma=...) (achado de auditoria, 08/08: ~70 linhas
+    identicas nas duas funcoes, unica diferenca era _pois vs _negbin)."""
+    tau = _tau_dixon_coles(lambda_home, lambda_away, rho)
     grid = {}
     total = 0.0
     for h in range(max_goals + 1):
+        ph = pmf_home(h)
         for a in range(max_goals + 1):
-            p = _pois(lambda_home, h) * _pois(lambda_away, a) * tau(h, a)
+            # tau(0,1)/tau(1,0) podem ficar negativos em favoritos extremos
+            # (lambda alto * rho forte) - achado de auditoria (08/08),
+            # reproduzido com lh=5.71/rho=-0.18 (ambos dentro da faixa
+            # aceita pelo sistema). Clampar em 0 antes de somar: uma
+            # probabilidade negativa viola o axioma basico e nao tem
+            # interpretacao - e artefato da correcao tau em regiao extrema,
+            # nao sinal real.
+            p = max(0.0, ph * pmf_away(a) * tau(h, a))
             grid[(h, a)] = p
             total += p
     # renormaliza (tau distorce levemente a soma)
@@ -76,6 +90,17 @@ def poisson_dixon_coles(lambda_home, lambda_away, rho=-0.11, max_goals=10):
         out[f"under_{line}"] = 1 - p
     out["margins"] = margins
     return out
+
+
+def poisson_dixon_coles(lambda_home, lambda_away, rho=-0.11, max_goals=10):
+    """Matriz de placares Poisson com correcao Dixon-Coles (tau) nos placares
+    baixos (0-0, 1-0, 0-1, 1-1). rho tipico da literatura: ~-0.1.
+
+    Retorna dict com p_home, p_draw, p_away, over/under 1.5/2.5/3.5, btts.
+    """
+    return _dixon_coles_grid(lambda_home, lambda_away, rho, max_goals,
+                              lambda h: _pois(lambda_home, h),
+                              lambda a: _pois(lambda_away, a))
 
 
 def _negbin(mu, k, forma):
@@ -109,49 +134,9 @@ def gols_dixon_coles(lambda_home, lambda_away, rho=-0.11, max_goals=10,
     """
     if forma is None:
         return poisson_dixon_coles(lambda_home, lambda_away, rho, max_goals)
-
-    def tau(x, y):
-        if x == 0 and y == 0:
-            return 1 - lambda_home * lambda_away * rho
-        if x == 0 and y == 1:
-            return 1 + lambda_home * rho
-        if x == 1 and y == 0:
-            return 1 + lambda_away * rho
-        if x == 1 and y == 1:
-            return 1 - rho
-        return 1.0
-
-    grid, total = {}, 0.0
-    for h in range(max_goals + 1):
-        ph = _negbin(lambda_home, h, forma)
-        for a in range(max_goals + 1):
-            p = ph * _negbin(lambda_away, a, forma) * tau(h, a)
-            grid[(h, a)] = p
-            total += p
-    for k in grid:
-        grid[k] /= total
-
-    out = {"p_home": 0.0, "p_draw": 0.0, "p_away": 0.0, "btts": 0.0}
-    overs = {1.5: 0.0, 2.5: 0.0, 3.5: 0.0}
-    margins = {}
-    for (h, a), p in grid.items():
-        if h > a:
-            out["p_home"] += p
-        elif h == a:
-            out["p_draw"] += p
-        else:
-            out["p_away"] += p
-        if h >= 1 and a >= 1:
-            out["btts"] += p
-        for line in overs:
-            if h + a > line:
-                overs[line] += p
-        margins[h - a] = margins.get(h - a, 0.0) + p
-    for line, p in overs.items():
-        out[f"over_{line}"] = p
-        out[f"under_{line}"] = 1 - p
-    out["margins"] = margins
-    return out
+    return _dixon_coles_grid(lambda_home, lambda_away, rho, max_goals,
+                              lambda h: _negbin(lambda_home, h, forma),
+                              lambda a: _negbin(lambda_away, a, forma))
 
 
 def win_by_margin(model_out, min_margin):
@@ -250,28 +235,44 @@ def poisson_grid(lambda_a, lambda_b, max_n=15):
 
     Retorna dict com "media_a", "media_b" e "grid" (dict (a,b)->p) - usar
     junto de over_under_time() para extrair over/under de um lado.
+
+    NAO renormaliza o grid pra somar 1 (achado de auditoria, 08/08): a
+    versao anterior forcava soma=1 dividindo pelo total truncado, o que
+    tornava o self-test "sum(grid.values()) > 0.999" tautologico (sempre
+    passa por construcao, nunca detecta truncamento real). Agora o grid
+    fica com a massa RAW da Poisson conjunta truncada em max_n - se
+    lambda_a/lambda_b forem grandes demais pra max_n, sum(grid.values())
+    cai de verdade abaixo de 1, e o self-test consegue pegar isso.
     """
     if lambda_a <= 0 or lambda_b <= 0:
         raise ValueError(f"lambdas tem que ser positivos, recebido ({lambda_a}, {lambda_b})")
-    grid, total = {}, 0.0
+    grid = {}
     for a in range(max_n + 1):
         pa = _pois(lambda_a, a)
         for b in range(max_n + 1):
-            p = pa * _pois(lambda_b, b)
-            grid[(a, b)] = p
-            total += p
-    for k in grid:
-        grid[k] /= total
+            grid[(a, b)] = pa * _pois(lambda_b, b)
     return {"media_a": lambda_a, "media_b": lambda_b, "grid": grid}
 
 
 def over_under_time(grid_out, lado, linha):
-    """P(over linha) para um dos dois lados de poisson_grid(). lado: 'a' ou 'b'."""
+    """P(over linha) para um dos dois lados de poisson_grid(). lado: 'a' ou 'b'.
+
+    Achado de auditoria (08/08): a versao anterior somava sobre o GRID
+    CONJUNTO 2D truncado em max_n (que poisson_grid() renormaliza pra somar
+    1) - quando 'linha' cai perto ou acima de max_n, TODAS as celulas do
+    grid satisfazem par[idx]<=piso por construcao (o grid nem tem celula
+    além de max_n), entao "under" virava 1.0 e over virava 0% nao importa o
+    lambda real. Reproduzido: lambda=20, max_n=15, linha=15.5 -> versao
+    antiga dava 0.0, valor real e' ~0.84. Fix: calcular a marginal de UM
+    lado direto da Poisson univariada (mesma tecnica tail-safe de
+    poisson_total - nunca subestima o over), sem depender do grid conjunto
+    truncado - o grid serve so pra consultas conjuntas (a par com b), nao
+    pra marginal de um lado so."""
     if lado not in ("a", "b"):
         raise ValueError(f"lado tem que ser 'a' ou 'b', recebido {lado!r}")
-    idx = 0 if lado == "a" else 1
+    lam = grid_out["media_a"] if lado == "a" else grid_out["media_b"]
     piso = int(math.floor(linha))
-    under = sum(p for par, p in grid_out["grid"].items() if par[idx] <= piso)
+    under = sum(_pois(lam, k) for k in range(piso + 1))
     return 1.0 - under
 
 
@@ -342,6 +343,22 @@ def devig_power(odds, tol=1e-10, max_iter=200):
             hi_k = mid
     k = (lo_k + hi_k) / 2
     return [i ** k for i in imps]
+
+
+def devig_proporcional(odds):
+    """De-vig proporcional (baseline mais simples): reparte a margem entre
+    os lados na mesma proporcao das probabilidades implicitas. Usado como
+    CENARIO adicional de robustez em avalia_evento() (pe_engine.py), ao
+    lado de devig_power e devig_shin. Movido de pe_engine.py pra ca (achado
+    de auditoria, 08/08) - a decisao 22 exige que todo de-vig viva no motor
+    central "USO OBRIGATORIO", e este era o unico que ficava fora."""
+    imps = [1.0 / o for o in odds]
+    s = sum(imps)
+    if s <= 1.0:
+        raise ValueError(
+            f"soma das probabilidades implicitas = {s:.4f} <= 1 - odds sem "
+            "margem sao dado de agregador invalido (regra v8), descartar")
+    return [i / s for i in imps]
 
 
 # -------------------------------------------------- inversao 1X2 -> lambdas
@@ -546,7 +563,16 @@ def ev_unitario(prob, odd):
 
 def kelly_fraction(prob, odd, fraction=0.25):
     """Fracao de Kelly (default quarter-Kelly, decisao B2). Nunca usar full.
-    Retorna fracao da banca (>=0)."""
+    Retorna fracao da banca (>=0).
+
+    Achado de auditoria (08/08): odd<=1.0 crashava com ZeroDivisionError
+    nao tratado (odd=1.0) ou, pior, aceitava odd<1.0 (que nao existe em
+    formato decimal) e devolvia uma fracao positiva sem sentido. Validado
+    aqui porque e codigo morto hoje (fase B1, stake fixo) mas a fase B2
+    (quarter-Kelly real) depende desta funcao - falhar cedo e alto e melhor
+    que herdar o bug quando entrar em producao."""
+    if odd <= 1.0:
+        raise ValueError(f"odd tem que ser > 1.0 (formato decimal), recebido {odd}")
     b = odd - 1
     full = (prob * b - (1 - prob)) / b
     return max(0.0, full * fraction)
@@ -586,13 +612,33 @@ def brier(pairs):
 # do mesmo evento). Multiplicar as probabilidades desses dois seria dupla
 # contagem, nao um erro de correlacao - NUNCA combinar pernas que descrevem
 # o mesmo desfecho subjacente (mesma familia de mercado no mesmo jogo).
-def prob_combinada(probs):
+#
+# GUARDA DE CODIGO (achado de auditoria, 08/08): ate aqui essa regra vivia so
+# em comentario - prob_combinada([p1, p2]) aceitava qualquer lista de floats
+# sem checar de onde cada probabilidade veio. Demonstrado com cenario
+# concreto: combinar "vitoria mandante" (1X2) com "Ambas Marcam" ou "Menos de
+# 1.5 gols" do MESMO jogo (pernas mecanicamente ligadas ao mesmo placar, nao
+# independentes) INFLA a probabilidade combinada em ate 31% e fabrica EV
+# positivo que nao existe - e combinada usa STAKE real, ao contrario de PE.
+# Por isso prob_combinada/ev_combinada agora exigem uma CATEGORIA por perna
+# ("gols"/"escanteios"/"cartoes"/"chutes"/...) e rejeitam categoria repetida -
+# forca o chamador a declarar de que familia de mercado cada perna vem, em
+# vez de confiar em disciplina manual.
+def prob_combinada(pernas):
     """Probabilidade conjunta de N pernas, assumindo independencia entre
-    elas. So valido para pernas de CATEGORIAS DIFERENTES (ver nota acima) -
-    o chamador e responsavel por garantir que nenhum par de pernas descreve
-    o mesmo desfecho subjacente."""
+    elas. 'pernas': lista de tuplas (probabilidade, categoria). So valido
+    para pernas de CATEGORIAS DIFERENTES (ver nota acima, validado com dado
+    real - phi entre -0.010 e +0.011, decisao 45); categoria repetida e
+    rejeitada (ValueError), nunca aceita em silencio."""
+    categorias = [c for _, c in pernas]
+    if len(categorias) != len(set(categorias)):
+        raise ValueError(
+            f"categorias repetidas em {categorias} - pernas da MESMA "
+            "categoria no mesmo evento sao mecanicamente ligadas (mesmo "
+            "desfecho subjacente), nao podem ser combinadas como "
+            "independentes (regra 10)")
     p = 1.0
-    for x in probs:
+    for x, _ in pernas:
         if not (0.0 <= x <= 1.0):
             raise ValueError(f"probabilidade fora de [0,1]: {x}")
         p *= x
@@ -600,7 +646,9 @@ def prob_combinada(probs):
 
 
 def odd_combinada(odds):
-    """Odd final de uma combinada (produto das odds das pernas)."""
+    """Odd final de uma combinada (produto das odds das pernas). Odds nao
+    carregam categoria - o risco de dupla contagem mora na PROBABILIDADE
+    (ver prob_combinada), nao no preco de mercado."""
     o = 1.0
     for x in odds:
         if x <= 1.0:
@@ -609,12 +657,13 @@ def odd_combinada(odds):
     return o
 
 
-def ev_combinada(probs, odds):
+def ev_combinada(pernas, odds):
     """EV por unidade apostada na combinada inteira - reusa ev_unitario()
-    sobre a probabilidade e a odd JA combinadas."""
-    if len(probs) != len(odds):
-        raise ValueError("probs e odds precisam ter o mesmo tamanho")
-    return ev_unitario(prob_combinada(probs), odd_combinada(odds))
+    sobre a probabilidade e a odd JA combinadas. 'pernas': lista de tuplas
+    (probabilidade, categoria), paralela a 'odds'."""
+    if len(pernas) != len(odds):
+        raise ValueError("pernas e odds precisam ter o mesmo tamanho")
+    return ev_unitario(prob_combinada(pernas), odd_combinada(odds))
 
 
 # --------------------------------------------------------------------- demo
@@ -664,18 +713,25 @@ def _demo():
     print("\n== Combinadas (v33): prob_combinada/odd_combinada/ev_combinada ==")
     # exemplo do proprio usuario: +8.5 escanteios @1.30 + +1.5 gols @1.20
     odds_pernas = [1.30, 1.20]
-    probs_pernas = [0.75, 0.83]  # ilustrativo - viria de taxa_empirica() (forma_recente.py)
+    # ilustrativo - viria de taxa_empirica() (forma_recente.py); categoria
+    # obrigatoria desde a guarda de codigo (achado de auditoria, ver docstring)
+    pernas = [(0.75, "escanteios"), (0.83, "gols")]
     odd_final = odd_combinada(odds_pernas)
-    prob_final = prob_combinada(probs_pernas)
-    ev_final = ev_combinada(probs_pernas, odds_pernas)
-    print(f"pernas: odds {odds_pernas} probs {probs_pernas}")
+    prob_final = prob_combinada(pernas)
+    ev_final = ev_combinada(pernas, odds_pernas)
+    print(f"pernas: odds {odds_pernas} | {pernas}")
     print(f"odd combinada = {odd_final:.2f} | prob combinada = {prob_final:.1%} | "
           f"EV = {ev_final:+.3f}u")
     assert abs(odd_final - 1.56) < 1e-9, "odd_combinada(1.30,1.20) deveria ser 1.56"
     assert abs(prob_final - 0.6225) < 1e-9, "prob_combinada(0.75,0.83) deveria ser 0.6225"
     assert abs(ev_final - ev_unitario(prob_final, odd_final)) < 1e-9, \
         "ev_combinada deveria bater com ev_unitario sobre os valores combinados"
-    print("Auto-testes de combinadas OK.")
+    try:
+        prob_combinada([(0.6, "gols"), (0.5, "gols")])
+        raise AssertionError("prob_combinada aceitou duas pernas da MESMA categoria (deveria rejeitar)")
+    except ValueError:
+        pass
+    print("Auto-testes de combinadas OK (inclusive rejeicao de categoria repetida).")
 
 
 if __name__ == "__main__":

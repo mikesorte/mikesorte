@@ -8,8 +8,12 @@ resultados esquecidos sem resolver, CLV esquecido sem preencher.
 """
 import csv
 import os
+import re
+import subprocess
 import sys
-from datetime import date
+from datetime import datetime, timedelta, timezone
+
+BRT = timezone(timedelta(hours=-3))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ERRORS, WARNINGS = [], []
@@ -89,7 +93,12 @@ def main():
                      "resultado", "ocorreu"])
 
     # 2) pendencias esquecidas (resultado/CLV de jogos passados)
-    today = date.today().isoformat()  # YYYY-MM-DD compara lexicograficamente
+    # BRT explicito, nunca date.today() (fuso do servidor/UTC) - achado de
+    # auditoria (08/08), mesma classe do bug real cometido ao vivo nesta
+    # sessao (perto da meia-noite UTC, "hoje" em BRT ainda e ontem - um
+    # jogo de hoje BRT seria erroneamente marcado "pendente de jogo
+    # passado" ou vice-versa, dependendo do lado da virada).
+    today = datetime.now(BRT).date().isoformat()  # YYYY-MM-DD compara lexicograficamente
     for r in apostas:
         d = r.get("data", "")
         if len(d) == 10 and d < today:
@@ -125,6 +134,71 @@ def main():
             err("motor: devig aceitou odds sem margem (deveria rejeitar, regra v8)")
         except ValueError:
             pass
+
+        # achado de auditoria (08/08): devig_shin, devig_proporcional, brier
+        # e kelly_fraction nunca tinham teste de regressao com valor
+        # conhecido, apesar de devig_shin ser o de-vig PADRAO de producao
+        # desde a decisao 42 (ligado ao pipeline real em scan_odds.py, v37).
+        from betting_model import devig_shin, devig_proporcional, brier, kelly_fraction
+        odds_3vias = [1.50, 4.20, 7.10]
+        s = devig_shin(odds_3vias)
+        assert abs(sum(s) - 1) < 1e-6, "devig_shin nao soma 1"
+        pr = devig_proporcional(odds_3vias)
+        assert abs(sum(pr) - 1) < 1e-6, "devig_proporcional nao soma 1"
+        # correcao do vies favorito-azarao (decisao 42): Shin, comparado ao
+        # proporcional (baseline mais simples, sem correcao nenhuma), da
+        # MAIS probabilidade ao favorito e MENOS ao azarao - e assim que a
+        # literatura (Shin 1992/93) diz que o metodo deveria se comportar.
+        # Comparar Shin contra POWER (nao proporcional) NAO testa a mesma
+        # coisa - POWER ja e uma correcao mais sofisticada que proporcional,
+        # a direcao so fica limpa contra o baseline mais simples.
+        assert s[0] > pr[0], f"Shin deveria dar mais prob ao favorito que o proporcional: {s[0]} <= {pr[0]}"
+        assert s[-1] < pr[-1], f"Shin deveria dar menos prob ao azarao que o proporcional: {s[-1]} >= {pr[-1]}"
+        try:
+            devig_shin([2.10, 2.10])
+            err("motor: devig_shin aceitou odds sem margem (deveria rejeitar, regra v8)")
+        except ValueError:
+            pass
+        try:
+            devig_proporcional([2.10, 2.10])
+            err("motor: devig_proporcional aceitou odds sem margem (deveria rejeitar, regra v8)")
+        except ValueError:
+            pass
+
+        assert abs(brier([(0.7, 1), (0.3, 0), (0.6, 1)]) - 0.11333333333) < 1e-8, \
+            "brier([(0.7,1),(0.3,0),(0.6,1)]) deveria ser 0.34/3"
+        assert brier([]) is None, "brier([]) deveria devolver None, nao crashar"
+
+        assert abs(kelly_fraction(0.55, 2.0) - 0.025) < 1e-9, "kelly_fraction(0.55,2.0) deveria ser 2.5%"
+        assert kelly_fraction(0.30, 2.0) == 0.0, "kelly_fraction com EV negativo deveria ser 0 (nunca negativo)"
+        try:
+            kelly_fraction(0.55, 1.0)
+            err("motor: kelly_fraction aceitou odd=1.0 (deveria rejeitar - ZeroDivisionError antigo, achado de auditoria)")
+        except ValueError:
+            pass
+        try:
+            kelly_fraction(0.55, 0.9)
+            err("motor: kelly_fraction aceitou odd<1.0 (deveria rejeitar - nao existe em decimal odds)")
+        except ValueError:
+            pass
+
+        # achado de auditoria (08/08): Dixon-Coles pode gerar probabilidade
+        # negativa numa celula em favoritos extremos (lambda alto * rho
+        # forte) - clampada em 0 desde o fix; confirma que o grid nunca
+        # tem valor negativo mesmo no caso de fronteira que expos o bug.
+        m_extremo = poisson_dixon_coles(5.71, 0.5, rho=-0.18)
+        assert all(v >= 0 for v in (m_extremo["p_home"], m_extremo["p_draw"], m_extremo["p_away"])), \
+            "poisson_dixon_coles com favorito extremo produziu probabilidade negativa"
+
+        # achado de auditoria (08/08): poisson_grid/over_under_time tinha
+        # truncamento quebrado - lambda alto perto/acima de max_n dava ~0%
+        # de over nao importa o valor real. Fix usa a marginal Poisson
+        # direta (tail-safe), independente do grid conjunto truncado.
+        from betting_model import poisson_grid, over_under_time
+        pg_extremo = poisson_grid(20, 20, max_n=15)
+        over_alto = over_under_time(pg_extremo, "a", 15.5)
+        assert over_alto > 0.80, \
+            f"over_under_time(lambda=20, linha=15.5) deveria ser proximo de 0.84, veio {over_alto}"
     except AssertionError as e:
         err(f"motor: REGRESSAO DETECTADA - {e}")
     except Exception as e:
@@ -476,19 +550,29 @@ def main():
     # betting_model.prob_combinada).
     try:
         from betting_model import prob_combinada, odd_combinada, ev_combinada
+        pernas = [(0.75, "escanteios"), (0.83, "gols")]
         assert abs(odd_combinada([1.30, 1.20]) - 1.56) < 1e-9, "odd_combinada(1.30,1.20) deveria ser 1.56"
-        assert abs(prob_combinada([0.75, 0.83]) - 0.6225) < 1e-9, "prob_combinada(0.75,0.83) deveria ser 0.6225"
-        assert abs(ev_combinada([0.75, 0.83], [1.30, 1.20])
-                   - ev_unitario(prob_combinada([0.75, 0.83]), odd_combinada([1.30, 1.20]))) < 1e-9, \
+        assert abs(prob_combinada(pernas) - 0.6225) < 1e-9, "prob_combinada(pernas) deveria ser 0.6225"
+        assert abs(ev_combinada(pernas, [1.30, 1.20])
+                   - ev_unitario(prob_combinada(pernas), odd_combinada([1.30, 1.20]))) < 1e-9, \
             "ev_combinada deveria bater com ev_unitario sobre os valores ja combinados"
         try:
-            prob_combinada([0.5, 1.5])
+            prob_combinada([(0.5, "gols"), (1.5, "escanteios")])
             err("prob_combinada aceitou probabilidade fora de [0,1] (deveria rejeitar)")
         except ValueError:
             pass
         try:
             odd_combinada([1.5, 0.9])
             err("odd_combinada aceitou odd invalida <=1.0 (deveria rejeitar)")
+        except ValueError:
+            pass
+        # achado de auditoria (08/08): pernas mecanicamente ligadas do mesmo
+        # jogo (mesma categoria) tem que ser rejeitadas, nunca combinadas
+        # como se fossem independentes - cenario real: 1X2 x BTTS do mesmo
+        # jogo inflava a prob combinada em ate 31% (EV positivo fabricado).
+        try:
+            prob_combinada([(0.6, "gols"), (0.55, "gols")])
+            err("prob_combinada aceitou duas pernas da MESMA categoria (deveria rejeitar - regra 10)")
         except ValueError:
             pass
     except AssertionError as e:
@@ -643,10 +727,103 @@ def main():
         evs = parse_mres_blocks(sint_listagem)
         assert len(evs) == 1 and evs[0]["odds"] == [2.0, 3.4, 4.0], \
             "parse_mres_blocks (compatibilidade) quebrou apos generalizacao do parser"
+
+        # achado de auditoria (08/08): escreve_csv_jogos nunca tinha teste
+        # de regressao proprio - validado manualmente contra producao mas
+        # nao travado em codigo. Roda ponta-a-ponta contra dado sintetico.
+        from scan_odds import escreve_csv_jogos
+        import tempfile
+        eventos_1x2 = parse_market_blocks(sint_listagem, MERCADOS["1x2"])
+        todos_sint2 = parse_todos_mercados(sint_listagem)
+        indices_outros = {chave: {(ev.get("participants"), ev.get("start_time")): ev for ev in lista}
+                           for chave, lista in todos_sint2.items() if chave != "1x2"}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            caminho_csv = os.path.join(tmpdir, "teste.csv")
+            n = escreve_csv_jogos(caminho_csv, eventos_1x2, indices_outros)
+            assert n == 1, f"escreve_csv_jogos deveria gravar 1 linha, gravou {n}"
+            with open(caminho_csv, encoding="utf-8") as f:
+                linhas_csv = list(csv.DictReader(f))
+            assert len(linhas_csv) == 1, "CSV deveria ter 1 linha de dado"
+            row = linhas_csv[0]
+            assert row["confronto"] == "Time A - Time B", f"confronto errado no CSV: {row['confronto']}"
+            assert row["odd_1"] == "2.0" and row["odd_x"] == "3.4" and row["odd_2"] == "4.0", \
+                f"odds 1X2 erradas no CSV: {row['odd_1']}/{row['odd_x']}/{row['odd_2']}"
+            assert row["odd_total_gols_0"] == "1.9", f"odd total_gols errada no CSV: {row['odd_total_gols_0']}"
+            assert row["linha_total_gols"] == "2.5", f"linha total_gols errada no CSV: {row['linha_total_gols']}"
+            assert row["justo_1"] != "", "justo_1 deveria estar preenchido (de-vig aplicado)"
+            # reescrever de novo tem que substituir, nao acumular (escrita
+            # atomica via tempfile+os.replace, achado de auditoria 08/08)
+            n2 = escreve_csv_jogos(caminho_csv, eventos_1x2, indices_outros)
+            with open(caminho_csv, encoding="utf-8") as f:
+                assert len(list(csv.DictReader(f))) == 1, "segunda escrita deveria substituir, nao acumular"
+
+        # achado de auditoria (08/08): find_all/_achar_ocorrencias_mercado
+        # quebrava silenciosamente se a fonte escapasse unicode (\uXXXX) -
+        # testa o mercado "Total de gols - 1° Tempo" (tem "°") serializado
+        # com ensure_ascii=True, como json.dumps produz por padrao.
+        nome_1t = MERCADOS["total_gols_1t"]
+        sint_unicode = (
+            '{"data":{"event":{"leagueName":"Liga Teste","name":"Time A - Time B","startTime":1785364200000,'
+            f'"markets":[{{"id":"1","name":{json.dumps(nome_1t)},"type":"OUH1","handicap":1.5,"selections":['
+            '{"id":"1","name":"Mais de 1.5","price":2.1},{"id":"2","name":"Menos de 1.5","price":1.75}]}]}}}}'
+        )
+        gols_1t = parse_market_blocks(sint_unicode, nome_1t)
+        assert len(gols_1t) == 1, ("parse_market_blocks nao achou o mercado com unicode escapado "
+                                    f"('{nome_1t}') - fallback de find_all quebrado")
+        assert gols_1t[0]["odds"] == [2.1, 1.75], f"odds do mercado unicode erradas: {gols_1t[0]['odds']}"
+
+        # achado de auditoria (08/08): colisao de mercado duplicado no mesmo
+        # evento tinha que avisar (stderr), nunca descartar em silencio.
+        from scan_odds import _indexar_sem_colisao
+        eventos_colisao = [
+            {"participants": "A - B", "start_time": "100", "odds": [1.5, 2.5]},
+            {"participants": "A - B", "start_time": "100", "odds": [1.6, 2.4]},  # mesma chave, colide
+        ]
+        idx_colisao = _indexar_sem_colisao(eventos_colisao, "teste")
+        assert len(idx_colisao) == 1, "colisao deveria manter so 1 entrada (a ultima), nao duplicar"
+        assert list(idx_colisao.values())[0]["odds"] == [1.6, 2.4], "colisao deveria manter a ULTIMA entrada"
+
+        # achado de auditoria (08/08): dump truncado tinha que ser detectado
+        from scan_odds import dump_parece_truncado
+        assert not dump_parece_truncado(sint_listagem), "dump sintetico completo nao deveria parecer truncado"
+        assert dump_parece_truncado(sint_listagem[:len(sint_listagem) // 2]), \
+            "dump cortado no meio deveria ser detectado como truncado"
     except AssertionError as e:
         err(f"scan_odds multi-mercado: REGRESSAO DETECTADA - {e}")
     except Exception as e:
         err(f"scan_odds multi-mercado: falha ao testar - {e}")
+
+    # 3m) ledger_stats.py (achado de auditoria, 08/08): o script que gera
+    # TODOS os numeros oficiais do relatorio/PDF nunca tinha nenhuma
+    # regressao - uma quebra silenciosa nele passaria por validate_system.py
+    # com exit 0. Smoke-test: roda de verdade contra o ledger REAL (nao tem
+    # como fixar valores esperados, o ledger muda todo dia) e confere
+    # invariantes estruturais + recomputa "N resolvido" de forma
+    # independente pra conferir que o numero impresso bate com uma
+    # contagem feita aqui, sem depender do proprio ledger_stats.py.
+    try:
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "ledger_stats.py")],
+                            capture_output=True, text=True, cwd=ROOT, timeout=30)
+        assert r.returncode == 0, f"ledger_stats.py saiu com codigo {r.returncode}: {r.stderr[:500]}"
+        saida = r.stdout
+        for cabecalho in ("=== APOSTAS DE VALOR", "=== COBERTURA POR FAMILIA DE MERCADO",
+                          "=== PALPITES ESTATISTICOS", "Calibracao por FAMILIA DE MERCADO"):
+            assert cabecalho in saida, f"ledger_stats.py nao imprimiu a secao esperada: '{cabecalho}'"
+
+        with open(os.path.join(ROOT, "data/apostas_ledger.csv"), newline="", encoding="utf-8") as f:
+            linhas_ledger = list(csv.DictReader(f))
+        n_esperado_min = sum(1 for r2 in linhas_ledger
+                             if r2.get("acerto_erro") in ("acerto", "erro"))
+        m = re.search(r"N resolvido:\s*(\d+)", saida)
+        assert m, "ledger_stats.py nao imprimiu 'N resolvido: <numero>'"
+        n_impresso = int(m.group(1))
+        assert n_impresso >= n_esperado_min, (
+            f"N resolvido impresso ({n_impresso}) menor que a contagem minima independente "
+            f"de acerto/erro no CSV ({n_esperado_min}) - numero pode estar errado")
+    except AssertionError as e:
+        err(f"ledger_stats: REGRESSAO DETECTADA - {e}")
+    except Exception as e:
+        err(f"ledger_stats: falha ao testar - {e}")
 
     # relatorio
     # O banner de rota (v17-d) foi REMOVIDO em 02/08: era uma muleta para o
