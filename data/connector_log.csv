@@ -18,3 +18,4 @@ timestamp_utc,hora_utc,nimble,tavily,exa,contexto,dispositivo,nota
 2026-08-05T01:09:17+00:00,1,ok,ok,ok,interativo,desconhecido,diaria - execucao apos autorizacao vai (dispositivo nao confirmado com o usuario)
 2026-08-05T10:56:46+00:00,10,ok,ok,ok,interativo,desconhecido,"diaria 07h, autorizado pelo usuario via chat apos push"
 2026-08-08T00:27:18+00:00,0,ok,ok,ok,interativo,desconhecido,"diaria 07h 08/08, autorizado via chat apos push"
+2026-08-08T16:33:54+00:00,16,ok,ok,ok,interativo,desconhecido,"diaria 07h 08/08, autorizado via chat apos push (2a autorizacao do dia)"
