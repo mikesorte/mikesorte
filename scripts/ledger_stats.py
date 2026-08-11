@@ -180,15 +180,29 @@ def main():
             if piso is None:
                 print(f"  {rotulo:<40} {sum(occs)}/{qtd} = {taxa:.0%}  (sem piso numerico p/ '{conf}' - so contexto)")
                 continue
+            # Achado de auditoria (revisao semanal 11/08): PISO_ALTA/PISO_MODERADA
+            # sao um PISO conservador ("calibrados para serem defensaveis, nao
+            # generosos" - item 9.3(b) da doc), nao uma previsao pontual. Taxa
+            # observada ACIMA do piso e o resultado ESPERADO de um filtro
+            # conservador funcionando bem, nao evidencia de miscalibracao -
+            # alertar nesse sentido gera alarme falso toda vez que o PE vai bem
+            # e desgasta o sinal real (overconfidence: taxa MUITO ABAIXO do que
+            # o piso promete, que e o unico caso que importa para decisao com
+            # dinheiro real). Alerta so dispara no sentido que interessa.
             desvio = taxa - piso
-            if abs(desvio) > 0.05:
+            if desvio < -0.05:
                 algum_alerta = True
-                print(f"  {rotulo:<40} {sum(occs)}/{qtd} = {taxa:.0%}  *** ALERTA: desvio {desvio:+.1%} "
-                      f"vs piso {conf} ({piso:.0%}), N={qtd}>={PISO_AMOSTRA_PEQUENA} ***")
+                print(f"  {rotulo:<40} {sum(occs)}/{qtd} = {taxa:.0%}  *** ALERTA: taxa {desvio:+.1%} "
+                      f"ABAIXO do piso {conf} ({piso:.0%}), N={qtd}>={PISO_AMOSTRA_PEQUENA} - "
+                      f"piso pode estar generoso demais ***")
+            elif desvio > 0.05:
+                print(f"  {rotulo:<40} {sum(occs)}/{qtd} = {taxa:.0%}  (acima do piso {conf} {piso:.0%} por "
+                      f"{desvio:+.1%} - esperado de um piso conservador, nao e alerta)")
             else:
                 print(f"  {rotulo:<40} {sum(occs)}/{qtd} = {taxa:.0%}  (dentro de 5pp do piso {conf} {piso:.0%})")
         if not algum_alerta:
-            print("  Nenhum grupo com N>=10 e desvio>5pp ainda (amostra geral pequena demais pra maioria).")
+            print("  Nenhum grupo com N>=10 e taxa abaixo do piso por >5pp ainda "
+                  "(amostra geral pequena demais pra maioria, ou piso tem se sustentado).")
 
     # guarda contra shadowing acidental de 'n' por blocos inseridos acima
     # (bug real introduzido e pego em 31/07: um 'for fam, n in ...' sobrescreveu

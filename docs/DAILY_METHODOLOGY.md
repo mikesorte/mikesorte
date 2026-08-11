@@ -1,6 +1,6 @@
 # Metodologia da Análise Diária de Apostas Esportivas
 
-**Versão: v37 (08/08/2026).** Esta é a fonte da verdade da metodologia.
+**Versão: v38 (11/08/2026).** Esta é a fonte da verdade da metodologia.
 A trigger agendada ("Análise Diária de Apostas Esportivas") só contém um
 prompt curto que manda ler este arquivo — ver `## Por que este arquivo existe`
 no fim. Qualquer atualização de metodologia deve ser feita AQUI (commit +
@@ -1258,6 +1258,96 @@ Nenhum arquivo de dado (ledgers, dumps) foi alterado retroativamente além
 do já documentado nas decisões anteriores — toda mudança desta decisão é
 em código/documentação. `validate_system.py` roda limpo (exit 0) com
 todos os novos testes após cada mudança individual, não só no final.
+
+(50) v38 (11/08, revisão semanal): **revisão semanal executada (Ciclo semanal completo,
+`docs/WEEKLY_METHODOLOGY.md`) — 3 PEs pendentes resolvidos, bug real de direção de
+alerta corrigido, achado de calibração cruzado com a auditoria multi-agente em
+andamento (ainda não fundida em código).**
+
+**Categoria A aplicada:**
+1. Fila 14.5 resolvida: pe_ledger ids 12-14 (09/08, todos "Total de Gols
+   Under 3.5 [Alta]" via `pe_engine.py`) confirmados com resultado real via
+   WebSearch — Cuiabá 1-1 Fortaleza (2 gols), San Lorenzo 0-2 Huracán (2
+   gols), Godoy Cruz 2-1 Chaco For Ever (3 gols): **os três OCORRERAM**
+   (2 e 3 gols, ambos <3.5). `pe_ledger` sem pendências.
+2. **Bug real de direção no alerta de calibração (`ledger_stats.py`, regra
+   v28).** Resolver os 3 PEs acima empurrou a família "Total de gols
+   [Alta]" para N=10 pela primeira vez, e o alerta disparou: "desvio +5.0%
+   vs piso Alta (75%)" — mas a taxa observada (80%) estava ACIMA do piso,
+   não abaixo. O código comparava `abs(taxa - piso) > 0.05` como se o piso
+   fosse uma previsão pontual; mas `PISO_ALTA`/`PISO_MODERADA` são,
+   pela própria doc (item 9.3-b), "calibrados para serem defensáveis, não
+   generosos" — um piso conservador que a taxa real deveria SUPERAR na
+   maioria das vezes quando o sistema funciona bem. Alertar nesse sentido
+   geraria alarme falso toda semana em que o PE for bem, degradando o
+   sinal real (o único caso que importa para dinheiro real é taxa MUITO
+   ABAIXO do piso prometido — overconfidence). Corrigido: alerta agora só
+   dispara quando `taxa < piso - 5pp`; taxa acima do piso por >5pp vira
+   linha informativa ("esperado de um piso conservador, não é alerta").
+   Nenhum piso/critério de aposta mudou — só a direção do alerta de
+   relatório.
+
+**Auditoria da semana (04-10/08, Passo 2):** cobertura por família segue
+concentrada em 1X2 (67% das linhas de Aposta de Valor, mesmo alerta desde
+v17-b — nenhuma mudança de critério, é lembrete operacional, não bug);
+todos os PEs emitidos entre 07-09/08 vieram do mesmo mecanismo automático
+(`pe_engine.py`, triagem "Total de Gols" derivada do 1X2) — nenhum PE via
+`forma_recente.py` (método a, série jogo-a-jogo real) esta semana, mesma
+lacuna estrutural já declarada (Tier 4, decisão 48: footystats pago,
+sofascore caro em buscas). Conectores ficaram `ok` em toda checagem
+interativa da semana (05, 08 x2, 09/08); nenhuma indisponibilidade nova.
+Item "candidato a reverificar" do ledger id=14 (LDU Quito, 03/08) expirou
+sem ação — o jogo já ocorreu antes que a segunda fonte pudesse confirmar
+a divergência de odd, registrado como encerrado sem uso. Dias 06/08 e
+10/08 sem execução (sem dump, sem commit, sem checagem de conector) —
+consistente com ausência de autorização do usuário nesses dias (protocolo
+de duas fases exige "vai" antes de qualquer ação), não falha de processo;
+sem evidência em contrário registrada.
+
+**Pesquisa dirigida (Passo 3) — sem mudança de código, contexto para o
+próximo ciclo:** (1) Brier score exige amostra maior para estabilidade,
+mas nenhuma fonte deu um piso numérico rígido para apostas esportivas —
+mantém-se a prática já em vigor (10-15 como piso de contexto, decisão
+14.5); (2) mercados Under/Over de ligas menos líquidas têm evidência
+qualitativa (não um número publicado rigoroso) de maior espaço a erro de
+precificação por menor atenção de mercado — contexto de apoio à regra 8,
+não evidência forte o bastante para mudar critério (8.1); (3) taxa-base
+de Over 2.5 no futebol europeu caiu de ~64,7% (23/24) para ~55% (25/26)
+em fontes de mercado (não acadêmicas) — se real, é um lembrete de que o
+dataset histórico 2000-2013 usado nos backtests de escanteios/cartões
+(decisão 44) pode estar cada vez mais defasado; não é ação nesta semana
+(sem fonte acadêmica rigorosa), mas mantém viva a vigilância já registrada
+na decisão 44 sobre esse dataset.
+
+**Categoria B proposta (não aplicada — aguarda confirmação do usuário):**
+1. **Nova fonte de dado para `forma_recente.py`:** Sportmonks oferece
+   plano gratuito sem cartão de crédito cobrindo 2 ligas completas
+   (estatísticas de partida, incluindo histórico), o que poderia finalmente
+   alimentar o motor de frequência empírica (decisão 45) com série
+   jogo-a-jogo real para pelo menos 2 ligas, fechando parte do Tier 4
+   (footystats pago / sofascore caro). Exige criar conta e chave de API —
+   fonte com credencial, Categoria B por definição (regra do Passo 4).
+   Proposta: testar o plano gratuito em 1-2 ligas antes de decidir se vale
+   formalizar.
+2. **Coluna numérica `prob_estimada` no `pe_ledger.csv`** para permitir
+   Brier real quando a amostra crescer — mesma necessidade já identificada
+   de forma independente pela varredura multi-agente em andamento (tarefa
+   aberta, ainda não fundida em código); registrar aqui só para não haver
+   dois pontos de decisão divergentes sobre o mesmo schema. Não implementar
+   agora nesta revisão — a mudança de schema de ambos os ledgers está sendo
+   desenhada em conjunto com o resto do "quadro-resumo" pedido pelo
+   usuário; aplicar uma vez, de forma coordenada, não em duas passadas
+   separadas.
+
+**Tamanho do arquivo (Passo 5):** 1613+ linhas em v37, cresceu para v38.
+Ainda não há falha de auditoria motivada pelo tamanho (nenhuma decisão
+antiga foi mal aplicada por causa disso) — mas está perto do ponto em que
+consolidar decisões antigas (v1-v20, já bem resumidas no texto) compensaria
+o risco de reescrever histórico sob execução autônoma sem o usuário
+presente. Proposta (Categoria B, por tocar o registro permanente): dedicar
+uma revisão semanal futura, com o usuário ciente, especificamente à
+consolidação de texto — não fazer de passagem numa revisão já carregada
+de outros achados.
 
 ## Casas licenciadas (SPA/MF)
 
